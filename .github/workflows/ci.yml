@@ -25,14 +25,41 @@ jobs:
     env:
       DOCKER_REGISTRY_URL: tip-tip-wlan-cloud-ucentral.jfrog.io
       DOCKER_REGISTRY_USERNAME: ucentral
+    outputs:
+      has_wlan_testing_pat: ${{ steps.check-secrets.outputs.has_wlan_testing_pat }}
     steps:
+    - name: Check secrets availability
+      id: check-secrets
+      env:
+        DOCKER_REGISTRY_PASSWORD: ${{ secrets.DOCKER_REGISTRY_PASSWORD }}
+        WLAN_TESTING_PAT: ${{ secrets.WLAN_TESTING_PAT }}
+        SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+      run: |
+        if [ -n "$DOCKER_REGISTRY_PASSWORD" ]; then
+          echo "has_docker_registry_password=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "has_docker_registry_password=false" >> "$GITHUB_OUTPUT"
+        fi
+        if [ -n "$WLAN_TESTING_PAT" ]; then
+          echo "has_wlan_testing_pat=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "has_wlan_testing_pat=false" >> "$GITHUB_OUTPUT"
+        fi
+        if [ -n "$SLACK_WEBHOOK" ]; then
+          echo "has_slack_webhook=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "has_slack_webhook=false" >> "$GITHUB_OUTPUT"
+        fi
+
     - name: Checkout actions repo
+      if: steps.check-secrets.outputs.has_docker_registry_password == 'true'
       uses: actions/checkout@v3
       with:
         repository: Telecominfraproject/.github
         path: github
 
     - name: Build and push Docker image
+      if: steps.check-secrets.outputs.has_docker_registry_password == 'true'
       uses: ./github/composite-actions/docker-image-build
       with:
         image_name: owsec
@@ -40,8 +67,24 @@ jobs:
         registry_user: ucentral
         registry_password: ${{ secrets.DOCKER_REGISTRY_PASSWORD }}
 
+    - name: Checkout repository (Fallback for forks/no secrets)
+      if: steps.check-secrets.outputs.has_docker_registry_password == 'false'
+      uses: actions/checkout@v3
+
+    - name: Set up Docker Buildx (Fallback for forks/no secrets)
+      if: steps.check-secrets.outputs.has_docker_registry_password == 'false'
+      uses: docker/setup-buildx-action@v3
+
+    - name: Build Docker image (Fallback for forks/no secrets)
+      if: steps.check-secrets.outputs.has_docker_registry_password == 'false'
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        push: false
+        tags: owsec:latest
+
     - name: Notify on failure via Slack
-      if: failure() && github.ref == 'refs/heads/main'
+      if: failure() && github.ref == 'refs/heads/main' && steps.check-secrets.outputs.has_slack_webhook == 'true'
       uses: rtCamp/action-slack-notify@v2
       env:
         SLACK_USERNAME: GitHub Actions failure notifier
@@ -51,9 +94,9 @@ jobs:
         SLACK_TITLE: Docker build failed for OWSec service
 
   trigger-testing:
-    if: startsWith(github.ref, 'refs/pull/')
-    runs-on: ubuntu-latest
     needs: docker
+    if: startsWith(github.ref, 'refs/pull/') && needs.docker.outputs.has_wlan_testing_pat == 'true'
+    runs-on: ubuntu-latest
     steps:
     - name: Get base branch name and set as output
       id: get_base_branch
