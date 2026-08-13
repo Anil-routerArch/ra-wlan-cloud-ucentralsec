@@ -12,6 +12,7 @@
 #include "StorageService.h"
 #include "TotpCache.h"
 #include "framework/MicroServiceFuncs.h"
+#include "framework/MicroServiceNames.h"
 #include "framework/ow_constants.h"
 
 #include <algorithm>
@@ -275,7 +276,7 @@ namespace OpenWifi {
 		}
 
 		if (Internal_) {
-			if (Requester() != uSERVICE_PROVISIONING.name) {
+			if (Requester() != uSERVICE_PROVISIONING) {
 				return UnAuthorized(RESTAPI::Errors::ACCESS_DENIED);
 			}
 		} else if (!ACLProcessor::CanReadUserRecord(UserInfo_.userinfo, UInfo)) {
