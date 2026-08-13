@@ -274,7 +274,11 @@ namespace OpenWifi {
 			return NotFound();
 		}
 
-		if (!Internal_ && !ACLProcessor::CanReadUserRecord(UserInfo_.userinfo, UInfo)) {
+		if (Internal_) {
+			if (Requester() != uSERVICE_PROVISIONING.name) {
+				return UnAuthorized(RESTAPI::Errors::ACCESS_DENIED);
+			}
+		} else if (!ACLProcessor::CanReadUserRecord(UserInfo_.userinfo, UInfo)) {
 			return UnAuthorized(RESTAPI::Errors::ACCESS_DENIED);
 		}
 
