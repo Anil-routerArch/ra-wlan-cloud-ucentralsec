@@ -278,7 +278,9 @@ namespace OpenWifi {
 		}
 
 		if (Internal_) {
-			if (Requester() != uSERVICE_PROVISIONING) {
+			if (Requester() != uSERVICE_PROVISIONING &&
+				Requester().find("16005") == std::string::npos &&
+				Requester().find("owprov") == std::string::npos) {
 				Logger_.information(fmt::format("RESTAPI_user_handler::DoGet - Internal access denied for requester: {}", Requester()));
 				return UnAuthorized(RESTAPI::Errors::ACCESS_DENIED);
 			}
