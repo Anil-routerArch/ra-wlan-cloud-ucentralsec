@@ -255,6 +255,22 @@ namespace OpenWifi {
 			NewUserInfo.to_json(ModifiedObject);
 			return true;
 		}
+
+		static bool IsRequesterService(const std::string &RequesterUrl, const std::string &ExpectedService) {
+			if (Poco::iCompare(RequesterUrl, ExpectedService) == 0)
+				return true;
+
+			if (RequesterUrl.find(ExpectedService) != std::string::npos)
+				return true;
+
+			auto Services = MicroService::instance().GetServices(ExpectedService);
+			for (const auto &Service : Services) {
+				if (Service.PublicEndPoint == RequesterUrl || Service.PrivateEndPoint == RequesterUrl) {
+					return true;
+				}
+			}
+			return false;
+		}
 	}
 
 	void RESTAPI_user_handler::DoGet() {
@@ -278,9 +294,7 @@ namespace OpenWifi {
 		}
 
 		if (Internal_) {
-			if (Requester() != uSERVICE_PROVISIONING &&
-				Requester().find("16005") == std::string::npos &&
-				Requester().find("owprov") == std::string::npos) {
+			if (!IsRequesterService(Requester(), uSERVICE_PROVISIONING)) {
 				Logger_.information(fmt::format("RESTAPI_user_handler::DoGet - Internal access denied for requester: {}", Requester()));
 				return UnAuthorized(RESTAPI::Errors::ACCESS_DENIED);
 			}
