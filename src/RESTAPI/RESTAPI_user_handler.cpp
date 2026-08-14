@@ -306,8 +306,6 @@ namespace OpenWifi {
 			return UnAuthorized(RESTAPI::Errors::ACCESS_DENIED);
 		}
 
-		Logger_.information(fmt::format("RESTAPI_user_handler::DoGet - Successfully returning user: {} ({})", UInfo.email, UInfo.id));
-
 		Poco::JSON::Object UserInfoObject;
 		Sanitize(UserInfo_, UInfo);
 		UInfo.to_json(UserInfoObject);
