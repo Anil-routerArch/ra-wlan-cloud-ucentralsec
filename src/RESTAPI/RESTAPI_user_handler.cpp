@@ -258,10 +258,18 @@ namespace OpenWifi {
 		}
 
 		static bool IsRequesterService(const std::string &RequesterUrl, const std::string &ExpectedService) {
-			auto Services = MicroService::instance().GetServices(ExpectedService);
+			if (RequesterUrl.empty()) {
+				return false;
+			}
+			if (RequesterUrl == ExpectedService) {
+				return true;
+			}
+			auto Services = MicroService::instance().GetServices();
 			for (const auto &Service : Services) {
-				if (Service.PublicEndPoint == RequesterUrl || Service.PrivateEndPoint == RequesterUrl) {
-					return true;
+				if (Service.Type == ExpectedService) {
+					if (Service.PublicEndPoint == RequesterUrl || Service.PrivateEndPoint == RequesterUrl || Service.Type == RequesterUrl) {
+						return true;
+					}
 				}
 			}
 			return false;
