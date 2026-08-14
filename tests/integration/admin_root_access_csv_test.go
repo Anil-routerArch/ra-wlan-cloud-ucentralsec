@@ -246,7 +246,9 @@ func verifyInternalUserRoutes(httpClient *http.Client, internalBaseURL, rootID s
 	}
 
 	internalClient := newAPIClient(internalBaseURL, httpClient)
-	checks := []struct {
+
+	// 1. Positive Internal Auth Check (Authorized internal service)
+	positiveChecks := []struct {
 		method string
 		path   string
 	}{
@@ -254,18 +256,31 @@ func verifyInternalUserRoutes(httpClient *http.Client, internalBaseURL, rootID s
 		{method: http.MethodGet, path: "/api/v1/users"},
 	}
 
-	for _, check := range checks {
+	for _, check := range positiveChecks {
 		resp, err := internalClient.doWithHeaders("", check.method, check.path, "", map[string]string{
 			"X-INTERNAL-NAME": internalName,
 			"X-API-KEY":       internalAPIKey,
 		})
 		if err != nil {
-			return fmt.Errorf("internal request %s %s failed: %w", check.method, check.path, err)
+			return fmt.Errorf("positive internal request %s %s failed: %w", check.method, check.path, err)
 		}
-		if !statusMatches("404", resp.StatusCode) {
-			return fmt.Errorf("internal request %s %s expected 404, got %d. Body: %s",
+		if !statusMatches("200", resp.StatusCode) {
+			return fmt.Errorf("positive internal request %s %s expected 200, got %d. Body: %s",
 				check.method, check.path, resp.StatusCode, string(resp.Body))
 		}
+	}
+
+	// 2. Negative Internal Auth Check (Unauthorized internal service)
+	negativeResp, err := internalClient.doWithHeaders("", http.MethodGet, "/api/v1/user/"+url.PathEscape(rootID), "", map[string]string{
+		"X-INTERNAL-NAME": "unauthorized-service-xyz",
+		"X-API-KEY":       "invalid-key-12345",
+	})
+	if err != nil {
+		return fmt.Errorf("negative internal request failed: %w", err)
+	}
+	if !statusMatches("401|403", negativeResp.StatusCode) {
+		return fmt.Errorf("negative internal request expected 401/403 access denied, got %d. Body: %s",
+			negativeResp.StatusCode, string(negativeResp.Body))
 	}
 
 	return nil
