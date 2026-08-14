@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -292,4 +293,23 @@ func sanitizeSubtestName(s string) string {
 	}
 	replacer := strings.NewReplacer(" ", "_", "/", "_", "\\", "_", ":", "_", "?", "_", "&", "_")
 	return replacer.Replace(s)
+}
+
+func TestInternalUserRoutesMock(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-INTERNAL-NAME") == "owprov" && r.Header.Get("X-API-KEY") == "test-key" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer server.Close()
+
+	t.Setenv("OWSEC_INTERNAL_NAME", "owprov")
+	t.Setenv("OWSEC_INTERNAL_API_KEY", "test-key")
+
+	err := verifyInternalUserRoutes(server.Client(), server.URL, "test-root-id")
+	if err != nil {
+		t.Fatalf("expected verifyInternalUserRoutes to succeed on mock server, got: %v", err)
+	}
 }
