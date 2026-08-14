@@ -78,7 +78,7 @@ namespace OpenWifi {
 		ORM::Field{"lastPasswords", ORM::FieldType::FT_TEXT},
 		ORM::Field{"oauthType", ORM::FieldType::FT_TEXT},
 		ORM::Field{"oauthUserInfo", ORM::FieldType::FT_TEXT},
-		ORM::Field{"modified", ORM::FieldType::FT_TEXT},
+		ORM::Field{"modified", ORM::FieldType::FT_BIGINT},
 		ORM::Field{"signingUp", ORM::FieldType::FT_TEXT}};
 
 	static ORM::IndexVec MakeIndices(const std::string &shortname) {
