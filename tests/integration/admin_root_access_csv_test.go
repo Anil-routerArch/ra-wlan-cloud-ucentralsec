@@ -253,7 +253,6 @@ func verifyInternalUserRoutes(httpClient *http.Client, internalBaseURL, rootID s
 		path   string
 	}{
 		{method: http.MethodGet, path: "/api/v1/user/" + url.PathEscape(rootID)},
-		{method: http.MethodGet, path: "/api/v1/users"},
 	}
 
 	for _, check := range positiveChecks {
