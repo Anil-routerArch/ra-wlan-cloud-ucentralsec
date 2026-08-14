@@ -269,19 +269,25 @@ namespace OpenWifi {
 		SecurityObjects::UserInfo UInfo;
 		if (HasParameter("byEmail", Arg) && Arg == "true") {
 			if (!StorageService()->UserDB().GetUserByEmail(Id, UInfo)) {
+				Logger_.information(fmt::format("RESTAPI_user_handler::DoGet - User not found by email: {}", Id));
 				return NotFound();
 			}
 		} else if (!StorageService()->UserDB().GetUserById(Id, UInfo)) {
+			Logger_.information(fmt::format("RESTAPI_user_handler::DoGet - User not found by Id: {}", Id));
 			return NotFound();
 		}
 
 		if (Internal_) {
 			if (Requester() != uSERVICE_PROVISIONING) {
+				Logger_.information(fmt::format("RESTAPI_user_handler::DoGet - Internal access denied for requester: {}", Requester()));
 				return UnAuthorized(RESTAPI::Errors::ACCESS_DENIED);
 			}
 		} else if (!ACLProcessor::CanReadUserRecord(UserInfo_.userinfo, UInfo)) {
+			Logger_.information(fmt::format("RESTAPI_user_handler::DoGet - ACL access denied for user: {}", UserInfo_.userinfo.email));
 			return UnAuthorized(RESTAPI::Errors::ACCESS_DENIED);
 		}
+
+		Logger_.information(fmt::format("RESTAPI_user_handler::DoGet - Successfully returning user: {} ({})", UInfo.email, UInfo.id));
 
 		Poco::JSON::Object UserInfoObject;
 		Sanitize(UserInfo_, UInfo);

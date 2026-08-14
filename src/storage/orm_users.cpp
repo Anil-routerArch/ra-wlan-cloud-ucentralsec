@@ -164,8 +164,11 @@ namespace OpenWifi {
 
 	bool BaseUserDB::GetUserById(const std::string &Id, SecurityObjects::UserInfo &User) {
 		try {
-			return GetRecord("id", Id, User);
+			bool found = GetRecord("id", Id, User);
+			Logger().information(fmt::format("GetUserById: Id={} found={} email='{}'", Id, found, found ? User.email : ""));
+			return found;
 		} catch (const Poco::Exception &E) {
+			Logger().error(fmt::format("GetUserById EXCEPTION for Id={}: {}", Id, E.displayText()));
 			Logger().log(E);
 		}
 		return false;
