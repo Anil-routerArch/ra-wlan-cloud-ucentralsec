@@ -258,12 +258,6 @@ namespace OpenWifi {
 		}
 
 		static bool IsRequesterService(const std::string &RequesterUrl, const std::string &ExpectedService) {
-			if (Poco::icompare(RequesterUrl, ExpectedService) == 0)
-				return true;
-
-			if (RequesterUrl.find(ExpectedService) != std::string::npos)
-				return true;
-
 			auto Services = MicroService::instance().GetServices(ExpectedService);
 			for (const auto &Service : Services) {
 				if (Service.PublicEndPoint == RequesterUrl || Service.PrivateEndPoint == RequesterUrl) {
