@@ -268,19 +268,39 @@ func verifyInternalUserRoutes(httpClient *http.Client, internalBaseURL, rootID s
 			return fmt.Errorf("positive internal request %s %s expected 200, got %d. Body: %s",
 				check.method, check.path, resp.StatusCode, string(resp.Body))
 		}
+		var userObj map[string]interface{}
+		if err := json.Unmarshal(resp.Body, &userObj); err != nil {
+			return fmt.Errorf("positive internal request %s %s returned invalid JSON: %w", check.method, check.path, err)
+		}
+		if _, hasID := userObj["id"]; !hasID {
+			return fmt.Errorf("positive internal request %s %s payload missing required 'id' field", check.method, check.path)
+		}
 	}
 
-	// 2. Negative Internal Auth Check (Unauthorized internal service)
-	negativeResp, err := internalClient.doWithHeaders("", http.MethodGet, "/api/v1/user/"+url.PathEscape(rootID), "", map[string]string{
+	// 2. Negative Internal Auth Check: Valid API Key + Unauthorized Service Name (Verifies IsRequesterService allowlist)
+	unauthServiceResp, err := internalClient.doWithHeaders("", http.MethodGet, "/api/v1/user/"+url.PathEscape(rootID), "", map[string]string{
 		"X-INTERNAL-NAME": "unauthorized-service-xyz",
+		"X-API-KEY":       internalAPIKey,
+	})
+	if err != nil {
+		return fmt.Errorf("negative internal request (unauthorized service) failed: %w", err)
+	}
+	if !statusMatches("401|403", unauthServiceResp.StatusCode) {
+		return fmt.Errorf("negative internal request (unauthorized service) expected 401/403 access denied, got %d. Body: %s",
+			unauthServiceResp.StatusCode, string(unauthServiceResp.Body))
+	}
+
+	// 3. Negative Internal Auth Check: Invalid API Key + Authorized Service Name
+	invalidKeyResp, err := internalClient.doWithHeaders("", http.MethodGet, "/api/v1/user/"+url.PathEscape(rootID), "", map[string]string{
+		"X-INTERNAL-NAME": internalName,
 		"X-API-KEY":       "invalid-key-12345",
 	})
 	if err != nil {
-		return fmt.Errorf("negative internal request failed: %w", err)
+		return fmt.Errorf("negative internal request (invalid key) failed: %w", err)
 	}
-	if !statusMatches("401|403", negativeResp.StatusCode) {
-		return fmt.Errorf("negative internal request expected 401/403 access denied, got %d. Body: %s",
-			negativeResp.StatusCode, string(negativeResp.Body))
+	if !statusMatches("401|403", invalidKeyResp.StatusCode) {
+		return fmt.Errorf("negative internal request (invalid key) expected 401/403 access denied, got %d. Body: %s",
+			invalidKeyResp.StatusCode, string(invalidKeyResp.Body))
 	}
 
 	return nil
@@ -299,9 +319,11 @@ func TestInternalUserRoutesMock(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("X-INTERNAL-NAME") == "owprov" && r.Header.Get("X-API-KEY") == "test-key" {
 			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"id":"test-root-id","email":"root@example.com"}`))
 			return
 		}
 		w.WriteHeader(http.StatusForbidden)
+		w.Write([]byte(`{"error":"access_denied"}`))
 	}))
 	defer server.Close()
 
