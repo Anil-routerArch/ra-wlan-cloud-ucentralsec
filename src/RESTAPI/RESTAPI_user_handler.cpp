@@ -11,6 +11,7 @@
 #include "SMTPMailerService.h"
 #include "StorageService.h"
 #include "TotpCache.h"
+#include "framework/MicroService.h"
 #include "framework/MicroServiceFuncs.h"
 #include "framework/MicroServiceNames.h"
 #include "framework/ow_constants.h"
@@ -257,7 +258,7 @@ namespace OpenWifi {
 		}
 
 		static bool IsRequesterService(const std::string &RequesterUrl, const std::string &ExpectedService) {
-			if (Poco::iCompare(RequesterUrl, ExpectedService) == 0)
+			if (Poco::icompare(RequesterUrl, ExpectedService) == 0)
 				return true;
 
 			if (RequesterUrl.find(ExpectedService) != std::string::npos)
@@ -280,6 +281,13 @@ namespace OpenWifi {
 			return BadRequest(RESTAPI::Errors::MissingUserID);
 		}
 
+		if (Internal_) {
+			if (!IsRequesterService(Requester(), uSERVICE_PROVISIONING)) {
+				Logger_.information(fmt::format("RESTAPI_user_handler::DoGet - Internal access denied for requester: {}", Requester()));
+				return UnAuthorized(RESTAPI::Errors::ACCESS_DENIED);
+			}
+		}
+
 		Poco::toLowerInPlace(Id);
 		std::string Arg;
 		SecurityObjects::UserInfo UInfo;
@@ -293,12 +301,7 @@ namespace OpenWifi {
 			return NotFound();
 		}
 
-		if (Internal_) {
-			if (!IsRequesterService(Requester(), uSERVICE_PROVISIONING)) {
-				Logger_.information(fmt::format("RESTAPI_user_handler::DoGet - Internal access denied for requester: {}", Requester()));
-				return UnAuthorized(RESTAPI::Errors::ACCESS_DENIED);
-			}
-		} else if (!ACLProcessor::CanReadUserRecord(UserInfo_.userinfo, UInfo)) {
+		if (!Internal_ && !ACLProcessor::CanReadUserRecord(UserInfo_.userinfo, UInfo)) {
 			Logger_.information(fmt::format("RESTAPI_user_handler::DoGet - ACL access denied for user: {}", UserInfo_.userinfo.email));
 			return UnAuthorized(RESTAPI::Errors::ACCESS_DENIED);
 		}
