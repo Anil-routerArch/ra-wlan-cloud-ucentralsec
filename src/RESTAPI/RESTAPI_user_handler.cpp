@@ -261,35 +261,20 @@ namespace OpenWifi {
 			return true;
 		}
 
-		static bool IsRequesterService(const std::string &RequesterUrl,
-									   const std::string &ApiKey,
-									   const std::string &ExpectedService) {
-			if (RequesterUrl.empty()) {
+		static bool IsRequesterServiceByApiKey(const std::string &ApiKey,
+											   const std::string &ExpectedService) {
+			if (ApiKey.empty()) {
 				return false;
 			}
 
-			// 1. Verify service identity by looking up AccessKey in the MicroService registry cache
-			if (!ApiKey.empty()) {
-				auto Services = MicroService::instance().GetServices();
-				for (const auto &Service : Services) {
-					if (!Service.AccessKey.empty() && Service.AccessKey == ApiKey) {
-						return Service.Type == ExpectedService;
-					}
-				}
-			}
-
-			// 2. Fallback: match via registered service endpoints or service type in MicroService registry
 			auto Services = MicroService::instance().GetServices();
 			for (const auto &Service : Services) {
-				if (Service.Type == ExpectedService) {
-					if (Service.PublicEndPoint == RequesterUrl ||
-						Service.PrivateEndPoint == RequesterUrl || Service.Type == RequesterUrl) {
-						return true;
-					}
+				if (!Service.AccessKey.empty() && Service.AccessKey == ApiKey) {
+					return Service.Type == ExpectedService;
 				}
 			}
 
-			return RequesterUrl == ExpectedService;
+			return false;
 		}
 	} // namespace
 
@@ -301,8 +286,14 @@ namespace OpenWifi {
 		}
 
 		if (Internal_) {
-			std::string ApiKey = GetParameter("X-API-KEY", "");
-			if (!IsRequesterService(Requester(), ApiKey, uSERVICE_PROVISIONING)) {
+			std::string ApiKey;
+			if (Request != nullptr && Request->has("X-API-KEY")) {
+				ApiKey = Request->get("X-API-KEY", "");
+			} else {
+				ApiKey = GetParameter("X-API-KEY", "");
+			}
+
+			if (ApiKey.empty() || !IsRequesterServiceByApiKey(ApiKey, uSERVICE_PROVISIONING)) {
 				Logger_.information(fmt::format(
 					"RESTAPI_user_handler::DoGet - Internal access denied for requester: {}",
 					Requester()));
