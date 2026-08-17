@@ -257,19 +257,18 @@ namespace OpenWifi {
 			return true;
 		}
 
-		static bool IsRequesterServiceByApiKey(const std::string &ApiKey,
-											   const std::string &ExpectedService) {
-			if (ApiKey.empty()) {
+		static bool IsOwprovRequester(const std::string &RequesterStr) {
+			if (RequesterStr.empty()) {
 				return false;
 			}
-
-			auto Services = MicroService::instance().GetServices();
-			for (const auto &Service : Services) {
-				if (!Service.AccessKey.empty() && Service.AccessKey == ApiKey) {
-					return Service.Type == ExpectedService;
+			if (RequesterStr == uSERVICE_PROVISIONING) {
+				return true;
+			}
+			for (const auto &Svc : MicroServiceGetServices(uSERVICE_PROVISIONING)) {
+				if (RequesterStr == Svc.PublicEndPoint || RequesterStr == Svc.PrivateEndPoint) {
+					return true;
 				}
 			}
-
 			return false;
 		}
 	}
@@ -282,12 +281,7 @@ namespace OpenWifi {
 		}
 
 		if (Internal_) {
-			std::string ApiKey;
-			if (Request != nullptr && Request->has("X-API-KEY")) {
-				ApiKey = Request->get("X-API-KEY", "");
-			}
-
-			if (ApiKey.empty() || !IsRequesterServiceByApiKey(ApiKey, uSERVICE_PROVISIONING)) {
+			if (!IsOwprovRequester(Requester())) {
 				Logger_.information(fmt::format(
 					"RESTAPI_user_handler::DoGet - Internal access denied for requester: {}",
 					Requester()));
