@@ -38,18 +38,15 @@ namespace OpenWifi {
 		}
 
 		inline bool IsAllowedSelfServiceField(const std::string &Field) {
-			static constexpr std::array<const char *, 7> AllowedFields{"name",
-																	   "description",
-																	   "location",
-																	   "locale",
-																	   "changePassword",
-																	   "currentPassword",
-																	   "userTypeProprietaryInfo"};
+			static constexpr std::array<const char *, 7> AllowedFields{
+				"name", "description", "location", "locale", "changePassword",
+				"currentPassword", "userTypeProprietaryInfo"};
 			return std::find(AllowedFields.begin(), AllowedFields.end(), Field) !=
 				   AllowedFields.end();
 		}
 
-		inline bool HasOnlyAllowedSelfServiceFields(const Poco::JSON::Object::Ptr &RawObject) {
+		inline bool HasOnlyAllowedSelfServiceFields(
+			const Poco::JSON::Object::Ptr &RawObject) {
 			for (const auto &Entry : *RawObject) {
 				if (!IsAllowedSelfServiceField(Entry.first)) {
 					return false;
@@ -58,8 +55,8 @@ namespace OpenWifi {
 			return true;
 		}
 
-		bool HandleResetMFA(const SecurityObjects::UserInfoAndPolicy &Caller, const std::string &Id,
-							SecurityObjects::UserInfo &Existing,
+		bool HandleResetMFA(const SecurityObjects::UserInfoAndPolicy &Caller,
+							const std::string &Id, SecurityObjects::UserInfo &Existing,
 							Poco::JSON::Object &ModifiedObject) {
 			Existing.userTypeProprietaryInfo.mfa.enabled = false;
 			Existing.userTypeProprietaryInfo.mfa.method.clear();
@@ -71,7 +68,7 @@ namespace OpenWifi {
 										  .note = "MFA Reset by " + Caller.userinfo.email});
 			auto UpdateId = Id;
 			if (!StorageService()->UserDB().UpdateUserInfo(Caller.userinfo.email, UpdateId,
-														   Existing)) {
+														  Existing)) {
 				return false;
 			}
 			SecurityObjects::UserInfo NewUserInfo;
@@ -86,8 +83,8 @@ namespace OpenWifi {
 		bool HandleForgotPassword(Poco::Logger &Log, const std::string &CallerAddress,
 								  SecurityObjects::UserInfo &Existing) {
 			Existing.changePassword = true;
-			Log.information(fmt::format("FORGOTTEN-PASSWORD({}): Request for {}", CallerAddress,
-										Existing.email));
+			Log.information(fmt::format("FORGOTTEN-PASSWORD({}): Request for {}",
+										CallerAddress, Existing.email));
 
 			SecurityObjects::ActionLink NewLink;
 			NewLink.action = OpenWifi::SecurityObjects::LinkActions::FORGOT_PASSWORD;
@@ -158,9 +155,8 @@ namespace OpenWifi {
 				return;
 			}
 
-			SecurityObjects::NoteInfoVec NIV =
-				RESTAPI_utils::to_object_array<SecurityObjects::NoteInfo>(
-					RawObject->get("notes").toString());
+			SecurityObjects::NoteInfoVec NIV = RESTAPI_utils::to_object_array<SecurityObjects::NoteInfo>(
+				RawObject->get("notes").toString());
 			for (const auto &i : NIV) {
 				SecurityObjects::NoteInfo ii{.created = (uint64_t)OpenWifi::Now(),
 											 .createdBy = Caller.userinfo.email,
@@ -185,8 +181,8 @@ namespace OpenWifi {
 		}
 
 		MfaUpdateStatus ApplyMfaChange(const SecurityObjects::UserInfoAndPolicy &Caller,
-									   const SecurityObjects::UserInfo &NewUser, bool HasMfaUpdate,
-									   SecurityObjects::UserInfo &Existing) {
+									   const SecurityObjects::UserInfo &NewUser,
+									   bool HasMfaUpdate, SecurityObjects::UserInfo &Existing) {
 			if (!HasMfaUpdate) {
 				return MfaUpdateStatus::Applied;
 			}
@@ -276,7 +272,7 @@ namespace OpenWifi {
 
 			return false;
 		}
-	} // namespace
+	}
 
 	void RESTAPI_user_handler::DoGet() {
 
@@ -306,20 +302,13 @@ namespace OpenWifi {
 		SecurityObjects::UserInfo UInfo;
 		if (HasParameter("byEmail", Arg) && Arg == "true") {
 			if (!StorageService()->UserDB().GetUserByEmail(Id, UInfo)) {
-				Logger_.information(
-					fmt::format("RESTAPI_user_handler::DoGet - User not found by email: {}", Id));
 				return NotFound();
 			}
 		} else if (!StorageService()->UserDB().GetUserById(Id, UInfo)) {
-			Logger_.information(
-				fmt::format("RESTAPI_user_handler::DoGet - User not found by Id: {}", Id));
 			return NotFound();
 		}
 
 		if (!Internal_ && !ACLProcessor::CanReadUserRecord(UserInfo_.userinfo, UInfo)) {
-			Logger_.information(
-				fmt::format("RESTAPI_user_handler::DoGet - ACL access denied for user: {}",
-							UserInfo_.userinfo.email));
 			return UnAuthorized(RESTAPI::Errors::ACCESS_DENIED);
 		}
 
