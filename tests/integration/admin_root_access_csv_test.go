@@ -318,6 +318,8 @@ func sanitizeSubtestName(s string) string {
 	return replacer.Replace(s)
 }
 
+// TestInternalUserRoutesMock provides standalone mock unit contract verification
+// for internal IPC header authentication (X-INTERNAL-NAME & X-API-KEY) and createdBy field payload assertions.
 func TestInternalUserRoutesMock(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("X-INTERNAL-NAME") == "owprov" && r.Header.Get("X-API-KEY") == "test-key" {
