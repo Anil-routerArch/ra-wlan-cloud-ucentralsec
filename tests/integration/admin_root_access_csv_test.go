@@ -275,6 +275,9 @@ func verifyInternalUserRoutes(httpClient *http.Client, internalBaseURL, rootID s
 		if _, hasID := userObj["id"]; !hasID {
 			return fmt.Errorf("positive internal request %s %s payload missing required 'id' field", check.method, check.path)
 		}
+		if _, hasCreatedBy := userObj["createdBy"]; !hasCreatedBy {
+			return fmt.Errorf("positive internal request %s %s payload missing required 'createdBy' field", check.method, check.path)
+		}
 	}
 
 	// 2. Negative Internal Auth Check: Valid API Key + Unauthorized Service Name (Verifies IsRequesterService allowlist)
@@ -319,7 +322,7 @@ func TestInternalUserRoutesMock(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("X-INTERNAL-NAME") == "owprov" && r.Header.Get("X-API-KEY") == "test-key" {
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"id":"test-root-id","email":"root@example.com"}`))
+			w.Write([]byte(`{"id":"test-root-id","email":"root@example.com","createdBy":"system"}`))
 			return
 		}
 		w.WriteHeader(http.StatusForbidden)
