@@ -285,8 +285,6 @@ namespace OpenWifi {
 			std::string ApiKey;
 			if (Request != nullptr && Request->has("X-API-KEY")) {
 				ApiKey = Request->get("X-API-KEY", "");
-			} else {
-				ApiKey = GetParameter("X-API-KEY", "");
 			}
 
 			if (ApiKey.empty() || !IsRequesterServiceByApiKey(ApiKey, uSERVICE_PROVISIONING)) {
