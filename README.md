@@ -4,23 +4,28 @@
   <img src="images/project/mango-logo.png" height="90" align="middle" alt="Mango Cloud Logo" />
 </p>
 
-# OpenWiFi Security (OWSEC)
+# OpenWiFi Security (OWSEC) - Mango Cloud
 
 ## Overview
-The OpenWiFi Security (OWSEC) is a core service within the Telecom Infra Project (TIP) OpenWiFi CloudSDK (OWSDK) ecosystem.
 
-OWSEC is the Authentication, Authorization, and Resource Policy Access service for the CloudSDK. Like all other OWSDK microservices, it is defined using an OpenAPI definition and communicates with management UIs and other services through a secure REST API. To use OWSEC, you can either [build it from source](#building) or deploy the containerized version using [Docker](#docker).
+OpenWiFi Security (OWSEC) is the authentication, authorization, and access-control service used within [Mango Cloud](https://www.mangowifi.cloud/), Router Architects' open-source OpenLAN-aligned Wi-Fi controller and platform for OpenWiFi managed Wi-Fi and connectivity operations.
+
+OWSEC is based on the Telecom Infra Project (TIP) OpenWiFi CloudSDK and provides centralized authentication, role-based access control, resource-access policies, and service discovery for Mango Cloud services, management applications, subscribers, and API integrations.
+
+OWSEC exposes an OpenAPI-defined REST API and integrates with other OpenWiFi CloudSDK services as part of the Mango Cloud platform.
+To use OWSEC, you can either [build it from source](#building) or deploy the containerized version using [Docker](#docker).
 
 ## Role in Mango Cloud
-This service is part of [Mango Cloud](https://www.mangowifi.cloud/), Router Architects’ open-source platform for managed Wi-Fi and connectivity operations.
 
-Within Mango Cloud, **OWSEC** serves as the central **Security, Authentication, and Access Control Service** (backend node `owsec`).
+This service is part of [Mango Cloud](https://www.mangowifi.cloud/), Router Architects' open-source, OpenLAN-aligned Wi-Fi controller and platform for ISPs, MSPs, Edge AI and IoT service provider.
 
-Key integrations include:
-* **Centralized Auth & Tokens**: Acts as the gatekeeper, issuing OAuth2 tokens for dashboard operators, subscribers, and external APIs.
-* **Service Discovery**: Manages and exposes system endpoints (via `/systemEndpoints`) so other microservices and UI components can discover and communicate with each other.
-* **Role-Based Access Control**: Manages users, roles, resource-access policies and password requirements used by Mango Cloud services to enforce authorization and tenant isolation.
+Within Mango Cloud, **OWSEC** provides the centralized authentication, authorization, and access-control layer used by platform services and management applications.
 
+Key responsibilities include:
+
+- **Authentication and Token Management** — authenticates users and issues OAuth2 tokens used to access Mango Cloud and OpenWiFi services.
+- **Service Discovery** — exposes registered system endpoints through `/systemEndpoints`, allowing Mango Cloud services and management applications to discover available microservices.
+  
 ### Resources
 * [Mango Cloud Website](https://www.mangowifi.cloud/)
 * [Mango Cloud Deployment Guide](https://github.com/routerarchitects/mango-cloud-deployment)
