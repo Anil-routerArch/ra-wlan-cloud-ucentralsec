@@ -275,9 +275,25 @@ func verifyInternalUserRoutes(httpClient *http.Client, internalBaseURL, rootID s
 		if _, hasID := userObj["id"]; !hasID {
 			return fmt.Errorf("positive internal request %s %s payload missing required 'id' field", check.method, check.path)
 		}
+		if _, hasCreatedBy := userObj["createdBy"]; !hasCreatedBy {
+			return fmt.Errorf("positive internal request %s %s payload missing required 'createdBy' field", check.method, check.path)
+		}
 	}
 
-	// 2. Negative Internal Auth Check: Valid API Key + Unauthorized Service Name (Verifies IsOwprovRequester allowlist)
+	// 2. Negative Internal Auth Check: Non-existent email lookup should return 404 Not Found
+	notFoundEmailResp, err := internalClient.doWithHeaders("", http.MethodGet, "/api/v1/user/nonexistent-user-xyz-999@example.com?byEmail=true", "", map[string]string{
+		"X-INTERNAL-NAME": internalName,
+		"X-API-KEY":       internalAPIKey,
+	})
+	if err != nil {
+		return fmt.Errorf("negative internal request (non-existent email) failed: %w", err)
+	}
+	if !statusMatches("404", notFoundEmailResp.StatusCode) {
+		return fmt.Errorf("negative internal request (non-existent email) expected 404, got %d. Body: %s",
+			notFoundEmailResp.StatusCode, string(notFoundEmailResp.Body))
+	}
+
+	// 3. Negative Internal Auth Check: Valid API Key + Unauthorized Service Name (Verifies IsOwprovRequester allowlist)
 	unauthServiceResp, err := internalClient.doWithHeaders("", http.MethodGet, "/api/v1/user/"+url.PathEscape(rootID), "", map[string]string{
 		"X-INTERNAL-NAME": "https://localhost:17004", // private endpoint of owfms / unauthorized service
 		"X-API-KEY":       internalAPIKey,
@@ -290,7 +306,7 @@ func verifyInternalUserRoutes(httpClient *http.Client, internalBaseURL, rootID s
 			unauthServiceResp.StatusCode, string(unauthServiceResp.Body))
 	}
 
-	// 3. Negative Internal Auth Check: Invalid API Key + Authorized Service Name
+	// 4. Negative Internal Auth Check: Invalid API Key + Authorized Service Name
 	invalidKeyResp, err := internalClient.doWithHeaders("", http.MethodGet, "/api/v1/user/"+url.PathEscape(rootID), "", map[string]string{
 		"X-INTERNAL-NAME": internalName,
 		"X-API-KEY":       "invalid-key-12345",
@@ -303,7 +319,7 @@ func verifyInternalUserRoutes(httpClient *http.Client, internalBaseURL, rootID s
 			invalidKeyResp.StatusCode, string(invalidKeyResp.Body))
 	}
 
-	// 4. Negative Internal Auth Check: Unauthenticated (Missing Headers)
+	// 5. Negative Internal Auth Check: Unauthenticated (Missing Headers)
 	noAuthResp, err := internalClient.doWithHeaders("", http.MethodGet, "/api/v1/user/"+url.PathEscape(rootID), "", map[string]string{})
 	if err != nil {
 		return fmt.Errorf("negative internal request (unauthenticated) failed: %w", err)
@@ -333,6 +349,9 @@ func TestInternalUserRoutesLive(t *testing.T) {
 	internalAPIKey := strings.TrimSpace(os.Getenv("OWSEC_INTERNAL_API_KEY"))
 
 	if internalBaseURL == "" || internalName == "" || internalAPIKey == "" {
+		if os.Getenv("CI") != "" {
+			t.Fatalf("CI execution requires OWSEC_INTERNAL_BASE_URL, OWSEC_INTERNAL_NAME, and OWSEC_INTERNAL_API_KEY to be configured for live daemon verification.")
+		}
 		t.Skip("Skipping live internal route verification: OWSEC_INTERNAL_BASE_URL, OWSEC_INTERNAL_NAME, and OWSEC_INTERNAL_API_KEY must be set.")
 	}
 
