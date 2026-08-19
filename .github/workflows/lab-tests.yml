@@ -206,6 +206,7 @@ jobs:
           OWSEC_INTERNAL_BASE_URL: https://127.0.0.1:17001/api/v1
           OWSEC_INTERNAL_NAME: https://localhost:17005
           OWSEC_INTERNAL_API_KEY: testkey
+          OWSEC_ROOT_ID: 11111111-0000-0000-6666-999999999999
           OW_RBAC_TLS_ROOT_CA: /tmp/owsec-data/certs/restapi-ca.pem
           OW_ALLOW_INSECURE_TLS: "true"
         run: |

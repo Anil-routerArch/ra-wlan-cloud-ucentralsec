@@ -360,8 +360,8 @@ func TestInternalUserRoutesLive(t *testing.T) {
 
 	// Verify live internal routes using configured values
 	rootID := os.Getenv("OWSEC_ROOT_ID")
-	if rootID == "" {
-		rootID = "0"
+	if rootID == "" || rootID == "0" {
+		rootID = "11111111-0000-0000-6666-999999999999"
 	}
 
 	if err := verifyInternalUserRoutes(httpClient, internalBaseURL, rootID); err != nil {
