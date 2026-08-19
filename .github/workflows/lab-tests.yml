@@ -109,6 +109,8 @@ jobs:
           if [ -f "/tmp/owsec-data/certs/restapi-cert.pem" ] && [ -f "/tmp/owsec-data/certs/restapi-key.pem" ]; then
             echo "[SUCCESS] Keys generated and saved at /tmp/owsec-data/certs/:"
             ls -la /tmp/owsec-data/certs/
+            echo "--- Certificate Subject & Issuer ---"
+            openssl x509 -in /tmp/owsec-data/certs/restapi-cert.pem -noout -subject -issuer -dates
           else
             echo "[ERROR] Key generation failed!"
             exit 1
@@ -167,12 +169,17 @@ jobs:
             echo "[ERROR] Key files NOT found inside container at /owsec-data/certs/!"
           fi
 
+          echo "=== Generated Configuration Log ==="
+          docker exec owsec cat /openwifi/owsec.properties 2>/dev/null || docker exec owsec cat /owsec-data/owsec.properties 2>/dev/null || true
+
           echo "Waiting for owsec daemon to start on port 16001 / 17001..."
 
           for i in {1..40}; do
             if curl -k -s --max-time 3 "https://localhost:16001/api/v1/system?command=info" > /dev/null 2>&1 || \
                curl -k -s --max-time 3 "https://localhost:17001/api/v1/system?command=info" > /dev/null 2>&1; then
               echo "owsec HTTPS endpoint is reachable!"
+              echo "=== owsec Daemon Process Status ==="
+              docker exec owsec ps aux || true
               exit 0
             fi
 
@@ -207,4 +214,9 @@ jobs:
       - name: Dump owsec container logs on failure
         if: failure()
         run: |
-          docker logs owsec --tail 200 || true
+          echo "=== Full owsec Container Logs ==="
+          docker logs owsec --tail 500 || true
+          echo "=== Container Environment Variables ==="
+          docker exec owsec env || true
+          echo "=== Generated owsec.properties Configuration ==="
+          docker exec owsec cat /openwifi/owsec.properties || true
