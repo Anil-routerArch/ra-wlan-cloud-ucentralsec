@@ -137,7 +137,7 @@ jobs:
             --name owsec \
             --network host \
             -e TEMPLATE_CONFIG=true \
-            -e SERVICE_KEY="" \
+            -e SERVICE_KEY=" " \
             -e KAFKA_ENABLE=true \
             -e KAFKA_BROKERLIST=localhost:9092 \
             -e STORAGE_TYPE=sqlite \
