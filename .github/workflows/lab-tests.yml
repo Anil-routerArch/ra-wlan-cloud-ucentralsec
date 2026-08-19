@@ -106,8 +106,13 @@ jobs:
 
           cp /tmp/owsec-data/certs/restapi-cert.pem /tmp/owsec-data/certs/restapi-ca.pem
 
+          cat > /tmp/owsec-data/data/registry.json <<'EOF'
+{}
+EOF
+
           chmod 644 /tmp/owsec-data/certs/*
           chmod 777 /tmp/owsec-data/data
+          chmod 666 /tmp/owsec-data/data/registry.json
 
           echo "=== Certificate & Public Key Generation & Storage Log ==="
           if [ -f "/tmp/owsec-data/certs/restapi-cert.pem" ] && [ -f "/tmp/owsec-data/certs/restapi-key.pem" ] && [ -f "/tmp/owsec-data/certs/restapi-public.pem" ]; then
