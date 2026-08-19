@@ -11,8 +11,8 @@
 //
 
 #include "Poco/Environment.h"
+#include "Poco/Net/SSLManager.h"
 #include "Poco/Util/Application.h"
-#include "Poco/Util/Option.h"
 
 #include "Daemon.h"
 
@@ -55,6 +55,7 @@ namespace OpenWifi {
 
 int main(int argc, char **argv) {
 	try {
+		Poco::Net::SSLManager::instance().initializeServer(nullptr, nullptr, nullptr);
 		SSL_library_init();
 		Aws::SDKOptions AwsOptions;
 		AwsOptions.memoryManagementOptions.memoryManager = nullptr;
