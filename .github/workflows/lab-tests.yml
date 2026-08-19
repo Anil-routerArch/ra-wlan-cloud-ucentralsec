@@ -94,19 +94,17 @@ jobs:
           mkdir -p /tmp/owsec-data/certs
           mkdir -p /tmp/owsec-data/data
 
-          # Generate Self-Signed Cert and Private Key in PKCS#1 format for localhost
-          openssl genrsa -traditional -out /tmp/owsec-data/certs/restapi-key-raw.pem 2048
-          openssl req -new -x509 -key /tmp/owsec-data/certs/restapi-key-raw.pem \
+          # Generate Self-Signed Cert and Private Key encrypted with 'mypassword' (matching production entrypoint)
+          openssl genrsa -traditional -aes128 -passout pass:mypassword -out /tmp/owsec-data/certs/restapi-key.pem 2048
+          openssl req -new -x509 -key /tmp/owsec-data/certs/restapi-key.pem -passin pass:mypassword \
             -out /tmp/owsec-data/certs/restapi-cert.pem -days 365 \
             -subj "/CN=localhost"
 
           # Extract and Save Explicit Public Key File
-          openssl rsa -in /tmp/owsec-data/certs/restapi-key-raw.pem -pubout -out /tmp/owsec-data/certs/restapi-public.pem
+          openssl rsa -in /tmp/owsec-data/certs/restapi-key.pem -passin pass:mypassword -pubout \
+            -out /tmp/owsec-data/certs/restapi-public.pem
 
           cp /tmp/owsec-data/certs/restapi-cert.pem /tmp/owsec-data/certs/restapi-ca.pem
-          # Concatenate Public Certificate and Private Key so Poco RSAKey("", key_file, "") can extract public factors
-          cat /tmp/owsec-data/certs/restapi-cert.pem /tmp/owsec-data/certs/restapi-key-raw.pem > /tmp/owsec-data/certs/restapi-key.pem
-          rm -f /tmp/owsec-data/certs/restapi-key-raw.pem
 
           chmod 644 /tmp/owsec-data/certs/*
           chmod 777 /tmp/owsec-data/data
@@ -121,7 +119,7 @@ jobs:
             openssl x509 -in /tmp/owsec-data/certs/restapi-cert.pem -noout -subject -issuer -dates
             echo "--- Cert & Private Key Modulus Match Check ---"
             echo "Cert Modulus MD5: $(openssl x509 -noout -modulus -in /tmp/owsec-data/certs/restapi-cert.pem | openssl md5)"
-            echo "Key  Modulus MD5: $(openssl rsa -noout -modulus -in /tmp/owsec-data/certs/restapi-key.pem | openssl md5)"
+            echo "Key  Modulus MD5: $(openssl rsa -noout -modulus -in /tmp/owsec-data/certs/restapi-key.pem -passin pass:mypassword | openssl md5)"
           else
             echo "[ERROR] Key generation failed!"
             exit 1
@@ -159,10 +157,6 @@ jobs:
             --name owsec \
             --network host \
             -e TEMPLATE_CONFIG=true \
-            -e RESTAPI_HOST_KEY_PASSWORD=" " \
-            -e INTERNAL_RESTAPI_HOST_KEY_PASSWORD=" " \
-            -e SERVICE_KEY_PASSWORD=" " \
-            -e SERVICE_KEY=" " \
             -e KAFKA_ENABLE=true \
             -e KAFKA_BROKERLIST=localhost:9092 \
             -e STORAGE_TYPE=sqlite \
