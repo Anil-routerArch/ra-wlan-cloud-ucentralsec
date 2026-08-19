@@ -87,48 +87,43 @@ jobs:
             --if-not-exists
 
       # ── 4. Generate Certificates & Prepare runtime data ─────────────────────
-      - name: Generate Certificates & Prepare runtime data
+      # ── Prepare owsec runtime data ─────────────────────────────────────────
+      - name: Prepare owsec runtime data
         run: |
           set -euo pipefail
 
           mkdir -p /tmp/owsec-data/certs
           mkdir -p /tmp/owsec-data/data
 
-          # Generate Self-Signed Cert and Private Key (Unencrypted RSA Key)
-          openssl req -new -nodes -newkey rsa:2048 \
+          cat > /tmp/owsec-data/data/registry.json <<'EOF'
+          {}
+          EOF
+
+          openssl req \
+            -x509 \
+            -nodes \
+            -days 1 \
+            -newkey rsa:2048 \
             -keyout /tmp/owsec-data/certs/restapi-key.pem \
-            -out /tmp/owsec-data/certs/restapi-cert.pem -x509 -days 365 \
+            -out /tmp/owsec-data/certs/restapi-cert.pem \
             -subj "/CN=localhost"
 
-          # Extract and Save Explicit Public Key File
           openssl rsa -in /tmp/owsec-data/certs/restapi-key.pem -pubout \
             -out /tmp/owsec-data/certs/restapi-public.pem
 
-          cp /tmp/owsec-data/certs/restapi-cert.pem /tmp/owsec-data/certs/restapi-ca.pem
+          cp /tmp/owsec-data/certs/restapi-cert.pem \
+            /tmp/owsec-data/certs/restapi-ca.pem
 
-          cat > /tmp/owsec-data/data/registry.json <<'EOF'
-{}
-EOF
+          chmod 644 /tmp/owsec-data/certs/restapi-key.pem
+          chmod 644 /tmp/owsec-data/certs/restapi-cert.pem
+          chmod 644 /tmp/owsec-data/certs/restapi-ca.pem
+          chmod 644 /tmp/owsec-data/certs/restapi-public.pem
 
-          chmod 644 /tmp/owsec-data/certs/*
           chmod 777 /tmp/owsec-data/data
           chmod 666 /tmp/owsec-data/data/registry.json
 
-          echo "=== Certificate & Public Key Generation & Storage Log ==="
-          if [ -f "/tmp/owsec-data/certs/restapi-cert.pem" ] && [ -f "/tmp/owsec-data/certs/restapi-key.pem" ] && [ -f "/tmp/owsec-data/certs/restapi-public.pem" ]; then
-            echo "[SUCCESS] Public Key, Certificate & Private Key generated and saved at /tmp/owsec-data/certs/:"
-            ls -la /tmp/owsec-data/certs/
-            echo "--- Public Key File Content Preview ---"
-            cat /tmp/owsec-data/certs/restapi-public.pem
-            echo "--- Certificate Subject & Issuer ---"
-            openssl x509 -in /tmp/owsec-data/certs/restapi-cert.pem -noout -subject -issuer -dates
-            echo "--- Cert & Private Key Modulus Match Check ---"
-            echo "Cert Modulus MD5: $(openssl x509 -noout -modulus -in /tmp/owsec-data/certs/restapi-cert.pem | openssl md5)"
-            echo "Key  Modulus MD5: $(openssl rsa -noout -modulus -in /tmp/owsec-data/certs/restapi-key.pem | openssl md5)"
-          else
-            echo "[ERROR] Key generation failed!"
-            exit 1
-          fi
+          echo "registry.json:"
+          cat /tmp/owsec-data/data/registry.json
 
       # ── 5. Publish Kafka service join event for owprov ───────────────────────
       - name: Publish owprov Kafka join event
@@ -161,14 +156,14 @@ EOF
           docker run -d \
             --name owsec \
             --network host \
+            -v /tmp/owsec-data/certs:/owsec-data/certs:ro \
+            -v /tmp/owsec-data/data:/owsec-data/data \
             -e TEMPLATE_CONFIG=true \
             -e KAFKA_ENABLE=true \
             -e KAFKA_BROKERLIST=localhost:9092 \
             -e STORAGE_TYPE=sqlite \
             -e RESTAPI_HOST_PORT=16001 \
             -e INTERNAL_RESTAPI_HOST_PORT=17001 \
-            -v /tmp/owsec-data/certs:/owsec-data/certs \
-            -v /tmp/owsec-data/data:/owsec-data/data \
             owsec:test
 
           echo "=== Container Status Log ==="
