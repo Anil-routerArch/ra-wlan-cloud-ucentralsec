@@ -125,31 +125,7 @@ jobs:
           echo "registry.json:"
           cat /tmp/owsec-data/data/registry.json
 
-      # ── 5. Publish Kafka service join event for owprov ───────────────────────
-      - name: Publish owprov Kafka join event
-        run: |
-          set -euo pipefail
-
-          JOIN_EVENT=$(cat <<'EOF'
-          {
-            "event": "join",
-            "id": 1,
-            "type": "owprov",
-            "privateEndPoint": "https://localhost:17005",
-            "publicEndPoint": "https://localhost:16005",
-            "key": "testkey",
-            "version": "1.0.0"
-          }
-          EOF
-          )
-
-          echo "$JOIN_EVENT" | docker exec -i kafka /opt/kafka/bin/kafka-console-producer.sh \
-            --bootstrap-server localhost:9092 \
-            --topic service_events
-
-          echo "Published owprov service join event to Kafka."
-
-      # ── 6. Start owsec Container ────────────────────────────────────────────
+      # ── 5. Start owsec Container ────────────────────────────────────────────
       - name: Start owsec container
         run: |
           set -euo pipefail
@@ -208,6 +184,32 @@ jobs:
           echo "ERROR: owsec daemon did not start in time!"
           docker logs owsec
           exit 1
+
+      # ── 6. Publish Kafka service join event for owprov ───────────────────────
+      - name: Publish owprov Kafka join event
+        run: |
+          set -euo pipefail
+
+          JOIN_EVENT=$(cat <<'EOF'
+          {
+            "event": "join",
+            "id": 1,
+            "type": "owprov",
+            "privateEndPoint": "https://localhost:17005",
+            "publicEndPoint": "https://localhost:16005",
+            "key": "testkey",
+            "version": "1.0.0"
+          }
+          EOF
+          )
+
+          echo "$JOIN_EVENT" | docker exec -i kafka /opt/kafka/bin/kafka-console-producer.sh \
+            --bootstrap-server localhost:9092 \
+            --topic service_events
+
+          echo "Published owprov service join event to Kafka."
+          echo "Waiting for owsec to consume service join event..."
+          sleep 5
 
       # ── 7. Execute Mandatory Live Integration Tests ─────────────────────────
       - name: Execute Mandatory Live Internal Route Security Tests

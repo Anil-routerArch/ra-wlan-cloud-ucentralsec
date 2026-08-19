@@ -746,7 +746,18 @@ namespace OpenWifi {
 	[[nodiscard]] bool MicroService::IsValidAPIKEY(const Poco::Net::HTTPServerRequest &Request) {
 		try {
 			auto APIKEY = Request.get("X-API-KEY");
-			return APIKEY == MyHash_;
+			if (APIKEY == MyHash_) {
+				return true;
+			}
+			auto InternalName = Request.get("X-INTERNAL-NAME", "");
+			std::lock_guard G(InfraMutex_);
+			for (const auto &[_, Svc] : Services_) {
+				if (APIKEY == Svc.AccessKey &&
+					(InternalName.empty() || InternalName == Svc.PrivateEndPoint ||
+					 InternalName == Svc.PublicEndPoint || InternalName == Svc.Type)) {
+					return true;
+				}
+			}
 		} catch (const Poco::Exception &E) {
 			Logger_.log(E);
 		}
