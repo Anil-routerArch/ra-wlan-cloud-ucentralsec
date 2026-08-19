@@ -750,10 +750,13 @@ namespace OpenWifi {
 				return true;
 			}
 			auto InternalName = Request.get("X-INTERNAL-NAME", "");
+			if (InternalName.empty()) {
+				return false;
+			}
 			std::lock_guard G(InfraMutex_);
 			for (const auto &[_, Svc] : Services_) {
 				if (APIKEY == Svc.AccessKey &&
-					(InternalName.empty() || InternalName == Svc.PrivateEndPoint ||
+					(InternalName == Svc.PrivateEndPoint ||
 					 InternalName == Svc.PublicEndPoint || InternalName == Svc.Type)) {
 					return true;
 				}
