@@ -94,14 +94,16 @@ jobs:
           mkdir -p /tmp/owsec-data/certs
           mkdir -p /tmp/owsec-data/data
 
-          # Generate Self-Signed Cert and Private Key for localhost
-          openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+          # Generate Self-Signed Cert and Private Key for localhost encrypted with default passphrase
+          openssl req -x509 -days 365 -newkey rsa:2048 \
+            -passout pass:mypassword \
             -keyout /tmp/owsec-data/certs/restapi-key.pem \
             -out /tmp/owsec-data/certs/restapi-cert.pem \
             -subj "/CN=localhost"
 
           # Convert private key to PKCS#1 RSA format required by Poco::Crypto::RSAKey
-          openssl rsa -in /tmp/owsec-data/certs/restapi-key.pem \
+          openssl rsa -traditional -passin pass:mypassword -passout pass:mypassword \
+            -in /tmp/owsec-data/certs/restapi-key.pem \
             -out /tmp/owsec-data/certs/restapi-key.pem
 
           cp /tmp/owsec-data/certs/restapi-cert.pem /tmp/owsec-data/certs/restapi-ca.pem
