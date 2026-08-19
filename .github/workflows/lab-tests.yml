@@ -160,18 +160,36 @@ jobs:
           docker run -d \
             --name owsec \
             --network host \
+            -e TEMPLATE_CONFIG=true \
+            -e RESTAPI_HOST_KEY_PASSWORD="" \
+            -e INTERNAL_RESTAPI_HOST_KEY_PASSWORD="" \
+            -e SERVICE_KEY_PASSWORD="" \
+            -e KAFKA_ENABLE=true \
+            -e KAFKA_BROKERLIST=localhost:9092 \
             -v /tmp/owsec-data/certs:/owsec-data/certs \
             -v /tmp/owsec-data/data:/owsec-data/data \
             owsec:test
 
           echo "Waiting for owsec daemon to start..."
-          sleep 10
+          for i in {1..30}; do
+            if docker logs owsec 2>&1 | grep -q "Starting REST API"; then
+              echo "owsec daemon started successfully!"
+              sleep 3
+              exit 0
+            fi
+            echo "Waiting for owsec daemon... ($i/30)"
+            sleep 2
+          done
+
+          echo "ERROR: owsec daemon failed to start!"
+          docker logs owsec --tail 100
+          exit 1
 
       # ── 7. Execute Mandatory Live Integration Tests ─────────────────────────
       - name: Execute Mandatory Live Internal Route Security Tests
         env:
-          OWSEC_BASE_URL: https://localhost:16001/api/v1
-          OWSEC_INTERNAL_BASE_URL: https://localhost:17001/api/v1
+          OWSEC_BASE_URL: https://127.0.0.1:16001/api/v1
+          OWSEC_INTERNAL_BASE_URL: https://127.0.0.1:17001/api/v1
           OWSEC_INTERNAL_NAME: https://localhost:17005
           OWSEC_INTERNAL_API_KEY: testkey
           OW_RBAC_TLS_ROOT_CA: /tmp/owsec-data/certs/restapi-ca.pem
