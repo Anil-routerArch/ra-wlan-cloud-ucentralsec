@@ -190,20 +190,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          JOIN_EVENT=$(cat <<'EOF'
-          {
-            "event": "join",
-            "id": 1,
-            "type": "owprov",
-            "privateEndPoint": "https://localhost:17005",
-            "publicEndPoint": "https://localhost:16005",
-            "key": "testkey",
-            "version": "1.0.0"
-          }
-          EOF
-          )
-
-          echo "$JOIN_EVENT" | docker exec -i kafka /opt/kafka/bin/kafka-console-producer.sh \
+          echo '{"event":"join","id":1,"type":"owprov","privateEndPoint":"https://localhost:17005","publicEndPoint":"https://localhost:16005","key":"testkey","version":"1.0.0"}' | \
+            docker exec -i kafka /opt/kafka/bin/kafka-console-producer.sh \
             --bootstrap-server localhost:9092 \
             --topic service_events
 
