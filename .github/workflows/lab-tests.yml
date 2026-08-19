@@ -95,12 +95,15 @@ jobs:
           mkdir -p /tmp/owsec-data/data
 
           # Generate Self-Signed Cert and Private Key in PKCS#1 format for localhost
-          openssl genrsa -traditional -out /tmp/owsec-data/certs/restapi-key.pem 2048
-          openssl req -new -x509 -key /tmp/owsec-data/certs/restapi-key.pem \
+          openssl genrsa -traditional -out /tmp/owsec-data/certs/restapi-key-raw.pem 2048
+          openssl req -new -x509 -key /tmp/owsec-data/certs/restapi-key-raw.pem \
             -out /tmp/owsec-data/certs/restapi-cert.pem -days 365 \
             -subj "/CN=localhost"
 
           cp /tmp/owsec-data/certs/restapi-cert.pem /tmp/owsec-data/certs/restapi-ca.pem
+          # Concatenate Public Certificate and Private Key so Poco RSAKey("", key_file, "") can extract public factors
+          cat /tmp/owsec-data/certs/restapi-cert.pem /tmp/owsec-data/certs/restapi-key-raw.pem > /tmp/owsec-data/certs/restapi-key.pem
+          rm -f /tmp/owsec-data/certs/restapi-key-raw.pem
 
           chmod 644 /tmp/owsec-data/certs/*
           chmod 777 /tmp/owsec-data/data
@@ -151,9 +154,9 @@ jobs:
             --name owsec \
             --network host \
             -e TEMPLATE_CONFIG=true \
-            -e RESTAPI_HOST_KEY_PASSWORD="" \
-            -e INTERNAL_RESTAPI_HOST_KEY_PASSWORD="" \
-            -e SERVICE_KEY_PASSWORD="" \
+            -e RESTAPI_HOST_KEY_PASSWORD=" " \
+            -e INTERNAL_RESTAPI_HOST_KEY_PASSWORD=" " \
+            -e SERVICE_KEY_PASSWORD=" " \
             -e SERVICE_KEY=" " \
             -e KAFKA_ENABLE=true \
             -e KAFKA_BROKERLIST=localhost:9092 \
