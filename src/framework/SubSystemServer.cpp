@@ -78,7 +78,7 @@ namespace OpenWifi {
 				Context->addCertificateAuthority(Issuing);
 			}
 
-			Poco::Crypto::RSAKey Key("", key_file_, key_file_password_);
+			Poco::Crypto::RSAKey Key(cert_file_, key_file_, key_file_password_);
 			Context->usePrivateKey(Key);
 
 			SSL_CTX *SSLCtx = Context->sslContext();

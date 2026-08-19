@@ -242,12 +242,16 @@ namespace OpenWifi {
 		std::string KeyFile = ConfigPath("openwifi.service.key", "");
 		if (!KeyFile.empty()) {
 			std::string KeyFilePassword = ConfigPath("openwifi.service.key.password", "");
-			AppKey_ = Poco::SharedPtr<Poco::Crypto::RSAKey>(
-				new Poco::Crypto::RSAKey("", KeyFile, KeyFilePassword));
-			Cipher_ = CipherFactory_.createCipher(*AppKey_);
-			Signer_.setRSAKey(AppKey_);
-			Signer_.addAllAlgorithms();
-			NoBuiltInCrypto_ = false;
+			try {
+				AppKey_ = Poco::SharedPtr<Poco::Crypto::RSAKey>(
+					new Poco::Crypto::RSAKey(KeyFile, KeyFile, KeyFilePassword));
+				Cipher_ = CipherFactory_.createCipher(*AppKey_);
+				Signer_.setRSAKey(AppKey_);
+				Signer_.addAllAlgorithms();
+				NoBuiltInCrypto_ = false;
+			} catch (...) {
+				NoBuiltInCrypto_ = true;
+			}
 		} else {
 			NoBuiltInCrypto_ = true;
 		}
