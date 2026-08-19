@@ -119,6 +119,19 @@ namespace OpenWifi {
 				return DoReturnA404();
 			}
 
+			const bool ValidUserAction =
+				Link.userAction &&
+				(Link.action == SecurityObjects::LinkActions::FORGOT_PASSWORD ||
+				 Link.action == SecurityObjects::LinkActions::VERIFY_EMAIL);
+
+			const bool ValidSubscriberAction =
+				!Link.userAction &&
+				Link.action == SecurityObjects::LinkActions::SUB_FORGOT_PASSWORD;
+
+			if (!ValidUserAction && !ValidSubscriberAction) {
+				return DoReturnA404();
+			}
+
 			if (Password1 != Password2 || !AuthService()->ValidatePassword(Password2) ||
 				!AuthService()->ValidatePassword(Password1)) {
 				Poco::File FormFile{Daemon()->AssetDir() + "/password_reset_error.html"};
@@ -169,6 +182,14 @@ namespace OpenWifi {
 					{"UUID", Id}, {"ERROR_TEXT", "You cannot reuse one of your recent passwords."}};
 				AddGlobalVars(FormVars);
 				return SendHTMLFileBack(FormFile, FormVars);
+			}
+
+			if (Link.action == OpenWifi::SecurityObjects::LinkActions::VERIFY_EMAIL) {
+				UInfo.waitingForEmailCheck = false;
+				UInfo.validated = true;
+				UInfo.lastEmailCheck = OpenWifi::Now();
+				UInfo.validationDate = OpenWifi::Now();
+				UInfo.changePassword = false;
 			}
 
 			UInfo.modified = OpenWifi::Now();
@@ -316,6 +337,10 @@ namespace OpenWifi {
 			return SendHTMLFileBack(FormFile, FormVars);
 		}
 
+		if (Link.userAction) {
+			return RequestResetPassword(Link);
+		}
+
 		Logger_.information(fmt::format("EMAIL-VERIFICATION(%s): For ID={}",
 										Request->clientAddress().toString(), UInfo.email));
 		UInfo.waitingForEmailCheck = false;
@@ -323,10 +348,7 @@ namespace OpenWifi {
 		UInfo.lastEmailCheck = OpenWifi::Now();
 		UInfo.validationDate = OpenWifi::Now();
 		UInfo.modified = OpenWifi::Now();
-		if (Link.userAction)
-			StorageService()->UserDB().UpdateUserInfo(UInfo.email, Link.userId, UInfo);
-		else
-			StorageService()->SubDB().UpdateUserInfo(UInfo.email, Link.userId, UInfo);
+		StorageService()->SubDB().UpdateUserInfo(UInfo.email, Link.userId, UInfo);
 		Types::StringPairVec FormVars{{"UUID", Link.id},
 									  {"USERNAME", UInfo.email},
 									  {"ACTION_LINK", MicroService::instance().GetUIURI()}};
