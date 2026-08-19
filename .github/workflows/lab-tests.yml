@@ -94,42 +94,20 @@ jobs:
           mkdir -p /tmp/owsec-data/certs
           mkdir -p /tmp/owsec-data/data
 
-          # Generate Root CA
-          openssl req -x509 -newkey rsa:2048 -nodes \
-            -keyout /tmp/owsec-data/certs/restapi-ca-key.pem \
-            -out /tmp/owsec-data/certs/restapi-ca.pem \
-            -days 365 -subj "/CN=LabRootCA"
-
-          # Generate SAN Server Certificate for localhost
-          cat > /tmp/owsec-san.cnf <<'EOF'
-          [req]
-          distinguished_name = req_distinguished_name
-          req_extensions = v3_req
-          prompt = no
-          [req_distinguished_name]
-          CN = localhost
-          [v3_req]
-          keyUsage = digitalSignature, keyEncipherment
-          extendedKeyUsage = serverAuth, clientAuth
-          subjectAltName = @alt_names
-          [alt_names]
-          DNS.1 = localhost
-          IP.1 = 127.0.0.1
-          EOF
-
-          openssl req -new -newkey rsa:2048 -nodes \
+          # Generate Self-Signed Cert and Private Key for localhost
+          openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
             -keyout /tmp/owsec-data/certs/restapi-key.pem \
-            -out /tmp/owsec-csr.pem \
-            -config /tmp/owsec-san.cnf
-
-          openssl x509 -req -in /tmp/owsec-csr.pem \
-            -CA /tmp/owsec-data/certs/restapi-ca.pem \
-            -CAkey /tmp/owsec-data/certs/restapi-ca-key.pem \
-            -CAcreateserial \
             -out /tmp/owsec-data/certs/restapi-cert.pem \
-            -days 365 -extfile /tmp/owsec-san.cnf -extensions v3_req
+            -subj "/CN=localhost"
+
+          # Convert private key to PKCS#1 RSA format required by Poco::Crypto::RSAKey
+          openssl rsa -in /tmp/owsec-data/certs/restapi-key.pem \
+            -out /tmp/owsec-data/certs/restapi-key.pem
+
+          cp /tmp/owsec-data/certs/restapi-cert.pem /tmp/owsec-data/certs/restapi-ca.pem
 
           chmod 644 /tmp/owsec-data/certs/*
+          chmod 777 /tmp/owsec-data/data
 
       # ── 5. Publish Kafka service join event for owprov ───────────────────────
       - name: Publish owprov Kafka join event
@@ -157,32 +135,42 @@ jobs:
       # ── 6. Start owsec Container ────────────────────────────────────────────
       - name: Start owsec container
         run: |
+          set -euo pipefail
+
           docker run -d \
             --name owsec \
             --network host \
             -e TEMPLATE_CONFIG=true \
-            -e RESTAPI_HOST_KEY_PASSWORD="" \
-            -e INTERNAL_RESTAPI_HOST_KEY_PASSWORD="" \
-            -e SERVICE_KEY_PASSWORD="" \
             -e KAFKA_ENABLE=true \
             -e KAFKA_BROKERLIST=localhost:9092 \
+            -e STORAGE_TYPE=sqlite \
+            -e RESTAPI_HOST_PORT=16001 \
+            -e INTERNAL_RESTAPI_HOST_PORT=17001 \
             -v /tmp/owsec-data/certs:/owsec-data/certs \
             -v /tmp/owsec-data/data:/owsec-data/data \
             owsec:test
 
-          echo "Waiting for owsec daemon to start..."
-          for i in {1..30}; do
-            if docker logs owsec 2>&1 | grep -q "Starting REST API"; then
-              echo "owsec daemon started successfully!"
-              sleep 3
+          echo "Waiting for owsec daemon to start on port 16001 / 17001..."
+
+          for i in {1..40}; do
+            if curl -k -s --max-time 3 "https://localhost:16001/api/v1/system?command=info" > /dev/null 2>&1 || \
+               curl -k -s --max-time 3 "https://localhost:17001/api/v1/system?command=info" > /dev/null 2>&1; then
+              echo "owsec HTTPS endpoint is reachable!"
               exit 0
             fi
-            echo "Waiting for owsec daemon... ($i/30)"
-            sleep 2
+
+            if ! docker inspect -f '{{.State.Running}}' owsec 2>/dev/null | grep -q true; then
+              echo "ERROR: owsec container exited!"
+              docker logs owsec
+              exit 1
+            fi
+
+            echo "attempt $i/40..."
+            sleep 3
           done
 
-          echo "ERROR: owsec daemon failed to start!"
-          docker logs owsec --tail 100
+          echo "ERROR: owsec daemon did not start in time!"
+          docker logs owsec
           exit 1
 
       # ── 7. Execute Mandatory Live Integration Tests ─────────────────────────
