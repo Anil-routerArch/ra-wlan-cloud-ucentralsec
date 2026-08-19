@@ -1,0 +1,187 @@
+name: Lab & RBAC Integration Tests
+
+on:
+  push:
+    branches:
+      - main
+      - anil-feature-sec
+  pull_request:
+    branches:
+      - main
+      - anil-feature-sec
+      - 'release/*'
+  workflow_dispatch:
+
+jobs:
+  lab-tests:
+    name: Run Lab Integration Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      # ── 1. Build Docker Image First ─────────────────────────────────────────
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build owsec Docker Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          load: true
+          tags: owsec:test
+
+      # ── 2. Start Kafka (KRaft mode, no ZooKeeper) ───────────────────────────
+      - name: Start Kafka
+        run: |
+          set -euo pipefail
+
+          docker run -d \
+            --name kafka \
+            --network host \
+            -e KAFKA_NODE_ID=1 \
+            -e KAFKA_PROCESS_ROLES=broker,controller \
+            -e KAFKA_LISTENERS=PLAINTEXT://:9092,CONTROLLER://:9093 \
+            -e KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://localhost:9092 \
+            -e KAFKA_CONTROLLER_LISTENER_NAMES=CONTROLLER \
+            -e KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT \
+            -e KAFKA_CONTROLLER_QUORUM_VOTERS=1@localhost:9093 \
+            -e KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1 \
+            -e KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR=1 \
+            -e KAFKA_TRANSACTION_STATE_LOG_MIN_ISR=1 \
+            apache/kafka:3.7.1
+
+          echo "Waiting for Kafka to be ready..."
+
+          for i in {1..30}; do
+            if docker exec kafka /opt/kafka/bin/kafka-topics.sh \
+              --bootstrap-server localhost:9092 \
+              --list > /dev/null 2>&1; then
+              echo "Kafka is ready!"
+              exit 0
+            fi
+
+            echo "attempt $i/30..."
+            sleep 2
+          done
+
+          echo "ERROR: Kafka did not start in time!"
+          docker logs kafka | tail -100
+          exit 1
+
+      # ── 3. Create Kafka service_events Topic ───────────────────────────────
+      - name: Create Kafka service_events topic
+        run: |
+          docker exec kafka /opt/kafka/bin/kafka-topics.sh \
+            --bootstrap-server localhost:9092 \
+            --create --topic service_events \
+            --partitions 1 --replication-factor 1 \
+            --if-not-exists
+
+      # ── 4. Generate Certificates & Prepare runtime data ─────────────────────
+      - name: Generate Certificates & Prepare runtime data
+        run: |
+          set -euo pipefail
+
+          mkdir -p /tmp/owsec-data/certs
+          mkdir -p /tmp/owsec-data/data
+
+          # Generate Root CA
+          openssl req -x509 -newkey rsa:2048 -nodes \
+            -keyout /tmp/owsec-data/certs/restapi-ca-key.pem \
+            -out /tmp/owsec-data/certs/restapi-ca.pem \
+            -days 365 -subj "/CN=LabRootCA"
+
+          # Generate SAN Server Certificate for localhost
+          cat > /tmp/owsec-san.cnf <<'EOF'
+[req]
+distinguished_name = req_distinguished_name
+req_extensions = v3_req
+prompt = no
+[req_distinguished_name]
+CN = localhost
+[v3_req]
+keyUsage = digitalSignature, keyEncipherment
+extendedKeyUsage = serverAuth, clientAuth
+subjectAltName = @alt_names
+[alt_names]
+DNS.1 = localhost
+IP.1 = 127.0.0.1
+EOF
+
+          openssl req -new -newkey rsa:2048 -nodes \
+            -keyout /tmp/owsec-data/certs/restapi-key.pem \
+            -out /tmp/owsec-csr.pem \
+            -config /tmp/owsec-san.cnf
+
+          openssl x509 -req -in /tmp/owsec-csr.pem \
+            -CA /tmp/owsec-data/certs/restapi-ca.pem \
+            -CAkey /tmp/owsec-data/certs/restapi-ca-key.pem \
+            -CAcreateserial \
+            -out /tmp/owsec-data/certs/restapi-cert.pem \
+            -days 365 -extfile /tmp/owsec-san.cnf -extensions v3_req
+
+          chmod 644 /tmp/owsec-data/certs/*
+
+      # ── 5. Publish Kafka service join event for owprov ───────────────────────
+      - name: Publish owprov Kafka join event
+        run: |
+          set -euo pipefail
+
+          JOIN_EVENT=$(cat <<'EOF'
+{
+  "event": "join",
+  "id": 1,
+  "type": "owprov",
+  "privateEndPoint": "https://localhost:17005",
+  "publicEndPoint": "https://localhost:16005",
+  "key": "testkey"
+}
+EOF
+          )
+
+          echo "$JOIN_EVENT" | docker exec -i kafka /opt/kafka/bin/kafka-console-producer.sh \
+            --bootstrap-server localhost:9092 \
+            --topic service_events
+
+          echo "Published owprov service join event to Kafka."
+
+      # ── 6. Start owsec Container ────────────────────────────────────────────
+      - name: Start owsec container
+        run: |
+          docker run -d \
+            --name owsec \
+            --network host \
+            -v /tmp/owsec-data/certs:/owsec-data/certs \
+            -v /tmp/owsec-data/data:/owsec-data/data \
+            owsec:test
+
+          echo "Waiting for owsec daemon to start..."
+          sleep 10
+
+      # ── 7. Execute Mandatory Live Integration Tests ─────────────────────────
+      - name: Execute Mandatory Live Internal Route Security Tests
+        env:
+          OWSEC_BASE_URL: https://localhost:16001/api/v1
+          OWSEC_INTERNAL_BASE_URL: https://localhost:17001/api/v1
+          OWSEC_INTERNAL_NAME: https://localhost:17005
+          OWSEC_INTERNAL_API_KEY: testkey
+          OW_RBAC_TLS_ROOT_CA: /tmp/owsec-data/certs/restapi-ca.pem
+          OW_ALLOW_INSECURE_TLS: "true"
+        run: |
+          cd tests/integration
+          go test -v -run TestInternalUserRoutesLive ./...
+
+      # ── 8. Dump owsec container logs on failure ────────────────────────────
+      - name: Dump owsec container logs on failure
+        if: failure()
+        run: |
+          docker logs owsec --tail 200 || true

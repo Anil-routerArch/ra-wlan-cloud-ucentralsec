@@ -349,10 +349,7 @@ func TestInternalUserRoutesLive(t *testing.T) {
 	internalAPIKey := strings.TrimSpace(os.Getenv("OWSEC_INTERNAL_API_KEY"))
 
 	if internalBaseURL == "" || internalName == "" || internalAPIKey == "" {
-		if os.Getenv("CI") != "" {
-			t.Fatalf("CI execution requires OWSEC_INTERNAL_BASE_URL, OWSEC_INTERNAL_NAME, and OWSEC_INTERNAL_API_KEY to be configured for live daemon verification.")
-		}
-		t.Skip("Skipping live internal route verification: OWSEC_INTERNAL_BASE_URL, OWSEC_INTERNAL_NAME, and OWSEC_INTERNAL_API_KEY must be set.")
+		t.Fatalf("Live daemon verification failed: OWSEC_INTERNAL_BASE_URL, OWSEC_INTERNAL_NAME, and OWSEC_INTERNAL_API_KEY environment variables are required.")
 	}
 
 	tlsRootCA := os.Getenv("OW_RBAC_TLS_ROOT_CA")
