@@ -105,6 +105,15 @@ jobs:
           chmod 644 /tmp/owsec-data/certs/*
           chmod 777 /tmp/owsec-data/data
 
+          echo "=== Certificate Generation & Storage Log ==="
+          if [ -f "/tmp/owsec-data/certs/restapi-cert.pem" ] && [ -f "/tmp/owsec-data/certs/restapi-key.pem" ]; then
+            echo "[SUCCESS] Keys generated and saved at /tmp/owsec-data/certs/:"
+            ls -la /tmp/owsec-data/certs/
+          else
+            echo "[ERROR] Key generation failed!"
+            exit 1
+          fi
+
       # ── 5. Publish Kafka service join event for owprov ───────────────────────
       - name: Publish owprov Kafka join event
         run: |
@@ -149,6 +158,14 @@ jobs:
             -v /tmp/owsec-data/certs:/owsec-data/certs \
             -v /tmp/owsec-data/data:/owsec-data/data \
             owsec:test
+
+          echo "=== Container Certificate Finding Log ==="
+          if docker exec owsec test -f /owsec-data/certs/restapi-key.pem && docker exec owsec test -f /owsec-data/certs/restapi-cert.pem; then
+            echo "[SUCCESS] Key files found inside owsec container at /owsec-data/certs/:"
+            docker exec owsec ls -la /owsec-data/certs/
+          else
+            echo "[ERROR] Key files NOT found inside container at /owsec-data/certs/!"
+          fi
 
           echo "Waiting for owsec daemon to start on port 16001 / 17001..."
 
