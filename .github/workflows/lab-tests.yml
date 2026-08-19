@@ -102,20 +102,20 @@ jobs:
 
           # Generate SAN Server Certificate for localhost
           cat > /tmp/owsec-san.cnf <<'EOF'
-[req]
-distinguished_name = req_distinguished_name
-req_extensions = v3_req
-prompt = no
-[req_distinguished_name]
-CN = localhost
-[v3_req]
-keyUsage = digitalSignature, keyEncipherment
-extendedKeyUsage = serverAuth, clientAuth
-subjectAltName = @alt_names
-[alt_names]
-DNS.1 = localhost
-IP.1 = 127.0.0.1
-EOF
+          [req]
+          distinguished_name = req_distinguished_name
+          req_extensions = v3_req
+          prompt = no
+          [req_distinguished_name]
+          CN = localhost
+          [v3_req]
+          keyUsage = digitalSignature, keyEncipherment
+          extendedKeyUsage = serverAuth, clientAuth
+          subjectAltName = @alt_names
+          [alt_names]
+          DNS.1 = localhost
+          IP.1 = 127.0.0.1
+          EOF
 
           openssl req -new -newkey rsa:2048 -nodes \
             -keyout /tmp/owsec-data/certs/restapi-key.pem \
@@ -137,15 +137,15 @@ EOF
           set -euo pipefail
 
           JOIN_EVENT=$(cat <<'EOF'
-{
-  "event": "join",
-  "id": 1,
-  "type": "owprov",
-  "privateEndPoint": "https://localhost:17005",
-  "publicEndPoint": "https://localhost:16005",
-  "key": "testkey"
-}
-EOF
+          {
+            "event": "join",
+            "id": 1,
+            "type": "owprov",
+            "privateEndPoint": "https://localhost:17005",
+            "publicEndPoint": "https://localhost:16005",
+            "key": "testkey"
+          }
+          EOF
           )
 
           echo "$JOIN_EVENT" | docker exec -i kafka /opt/kafka/bin/kafka-console-producer.sh \
