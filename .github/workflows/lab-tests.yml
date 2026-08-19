@@ -137,7 +137,8 @@ jobs:
             "type": "owprov",
             "privateEndPoint": "https://localhost:17005",
             "publicEndPoint": "https://localhost:16005",
-            "key": "testkey"
+            "key": "testkey",
+            "version": "1.0.0"
           }
           EOF
           )
