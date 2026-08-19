@@ -205,11 +205,28 @@ jobs:
           OWSEC_BASE_URL: https://127.0.0.1:16001/api/v1
           OWSEC_INTERNAL_BASE_URL: https://127.0.0.1:17001/api/v1
           OWSEC_INTERNAL_NAME: https://localhost:17005
-          OWSEC_INTERNAL_API_KEY: testkey
           OWSEC_ROOT_ID: 11111111-0000-0000-6666-999999999999
           OW_RBAC_TLS_ROOT_CA: /tmp/owsec-data/certs/restapi-ca.pem
           OW_ALLOW_INSECURE_TLS: "true"
         run: |
+          set -euo pipefail
+
+          echo "Extracting owsec API Key from Kafka service_events topic..."
+          EXTRACTED_KEY=$(docker exec -i kafka /opt/kafka/bin/kafka-console-consumer.sh \
+            --bootstrap-server localhost:9092 \
+            --topic service_events \
+            --from-beginning \
+            --timeout-ms 5000 2>/dev/null | grep -o '"key":"[^"]*"' | head -n 1 | cut -d'"' -f4 || true)
+
+          if [ -n "$EXTRACTED_KEY" ]; then
+            echo "[SUCCESS] Extracted owsec API Key from Kafka: ${EXTRACTED_KEY}"
+            export OWSEC_INTERNAL_API_KEY="${EXTRACTED_KEY}"
+          else
+            echo "[WARNING] Could not extract API key from Kafka; calculating SHA256 of public endpoint..."
+            export OWSEC_INTERNAL_API_KEY=$(echo -n "https://localhost:16001" | sha256sum | awk '{print $1}')
+            echo "Calculated OWSEC_INTERNAL_API_KEY: ${OWSEC_INTERNAL_API_KEY}"
+          fi
+
           cd tests/integration
           go test -v -run TestInternalUserRoutesLive ./...
 
