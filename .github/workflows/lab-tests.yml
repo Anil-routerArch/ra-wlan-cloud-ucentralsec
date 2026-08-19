@@ -100,6 +100,9 @@ jobs:
             -out /tmp/owsec-data/certs/restapi-cert.pem -days 365 \
             -subj "/CN=localhost"
 
+          # Extract and Save Explicit Public Key File
+          openssl rsa -in /tmp/owsec-data/certs/restapi-key-raw.pem -pubout -out /tmp/owsec-data/certs/restapi-public.pem
+
           cp /tmp/owsec-data/certs/restapi-cert.pem /tmp/owsec-data/certs/restapi-ca.pem
           # Concatenate Public Certificate and Private Key so Poco RSAKey("", key_file, "") can extract public factors
           cat /tmp/owsec-data/certs/restapi-cert.pem /tmp/owsec-data/certs/restapi-key-raw.pem > /tmp/owsec-data/certs/restapi-key.pem
@@ -108,10 +111,12 @@ jobs:
           chmod 644 /tmp/owsec-data/certs/*
           chmod 777 /tmp/owsec-data/data
 
-          echo "=== Certificate Generation & Storage Log ==="
-          if [ -f "/tmp/owsec-data/certs/restapi-cert.pem" ] && [ -f "/tmp/owsec-data/certs/restapi-key.pem" ]; then
-            echo "[SUCCESS] Keys generated and saved at /tmp/owsec-data/certs/:"
+          echo "=== Certificate & Public Key Generation & Storage Log ==="
+          if [ -f "/tmp/owsec-data/certs/restapi-cert.pem" ] && [ -f "/tmp/owsec-data/certs/restapi-key.pem" ] && [ -f "/tmp/owsec-data/certs/restapi-public.pem" ]; then
+            echo "[SUCCESS] Public Key, Certificate & Private Key generated and saved at /tmp/owsec-data/certs/:"
             ls -la /tmp/owsec-data/certs/
+            echo "--- Public Key File Content Preview ---"
+            cat /tmp/owsec-data/certs/restapi-public.pem
             echo "--- Certificate Subject & Issuer ---"
             openssl x509 -in /tmp/owsec-data/certs/restapi-cert.pem -noout -subject -issuer -dates
             echo "--- Cert & Private Key Modulus Match Check ---"
