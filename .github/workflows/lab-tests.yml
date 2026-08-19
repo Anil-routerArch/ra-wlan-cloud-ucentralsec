@@ -111,6 +111,9 @@ jobs:
             ls -la /tmp/owsec-data/certs/
             echo "--- Certificate Subject & Issuer ---"
             openssl x509 -in /tmp/owsec-data/certs/restapi-cert.pem -noout -subject -issuer -dates
+            echo "--- Cert & Private Key Modulus Match Check ---"
+            echo "Cert Modulus MD5: $(openssl x509 -noout -modulus -in /tmp/owsec-data/certs/restapi-cert.pem | openssl md5)"
+            echo "Key  Modulus MD5: $(openssl rsa -noout -modulus -in /tmp/owsec-data/certs/restapi-key.pem | openssl md5)"
           else
             echo "[ERROR] Key generation failed!"
             exit 1
@@ -161,6 +164,9 @@ jobs:
             -v /tmp/owsec-data/data:/owsec-data/data \
             owsec:test
 
+          echo "=== Container Status Log ==="
+          docker inspect --format='Container ID: {{.Id}} | State: {{.State.Status}} | Running: {{.State.Running}}' owsec
+
           echo "=== Container Certificate Finding Log ==="
           if docker exec owsec test -f /owsec-data/certs/restapi-key.pem && docker exec owsec test -f /owsec-data/certs/restapi-cert.pem; then
             echo "[SUCCESS] Key files found inside owsec container at /owsec-data/certs/:"
@@ -177,7 +183,10 @@ jobs:
           for i in {1..40}; do
             if curl -k -s --max-time 3 "https://localhost:16001/api/v1/system?command=info" > /dev/null 2>&1 || \
                curl -k -s --max-time 3 "https://localhost:17001/api/v1/system?command=info" > /dev/null 2>&1; then
-              echo "owsec HTTPS endpoint is reachable!"
+              echo "[SUCCESS] owsec HTTPS endpoint is reachable!"
+              echo "=== Endpoint Info Response Payload ==="
+              curl -k -s "https://localhost:16001/api/v1/system?command=info" || curl -k -s "https://localhost:17001/api/v1/system?command=info" || true
+              echo ""
               echo "=== owsec Daemon Process Status ==="
               docker exec owsec ps aux || true
               exit 0
@@ -220,3 +229,5 @@ jobs:
           docker exec owsec env || true
           echo "=== Generated owsec.properties Configuration ==="
           docker exec owsec cat /openwifi/owsec.properties || true
+          echo "=== Host Data Directory Diagnostics ==="
+          ls -la /tmp/owsec-data/certs/ /tmp/owsec-data/data/ || true
