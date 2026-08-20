@@ -240,10 +240,7 @@ func verifyInternalUserRoutes(httpClient *http.Client, internalBaseURL, rootID s
 	}
 
 	internalName := strings.TrimSpace(os.Getenv("X_INTERNAL_NAME"))
-	if internalName == "" {
-		internalName = strings.TrimSpace(os.Getenv("OWSEC_INTERNAL_NAME"))
-	}
-	internalAPIKey := strings.TrimSpace(os.Getenv("OWSEC_INTERNAL_API_KEY"))
+	internalAPIKey := strings.TrimSpace(os.Getenv("X_API_KEY"))
 	if internalName == "" || internalAPIKey == "" {
 		return nil
 	}
@@ -296,16 +293,16 @@ func verifyInternalUserRoutes(httpClient *http.Client, internalBaseURL, rootID s
 			notFoundEmailResp.StatusCode, string(notFoundEmailResp.Body))
 	}
 
-	// 3. Negative Internal Auth Check: Valid API Key + Unauthorized Service Name (Verifies IsOwprovRequester allowlist)
+	// 3. Negative Internal Auth Check: Valid API Key + Registered non-owprov Service URL (owfms at https://localhost:17004)
 	unauthServiceResp, err := internalClient.doWithHeaders("", http.MethodGet, "/api/v1/user/"+url.PathEscape(rootID), "", map[string]string{
-		"X-INTERNAL-NAME": "https://localhost:17004", // private endpoint of owfms / unauthorized service
-		"X-API-KEY":       internalAPIKey,
+		"X-INTERNAL-NAME": "https://localhost:17004", // private endpoint of registered owfms service (not owprov)
+		"X-API-KEY":       internalAPIKey,           // valid SHA256 API key
 	})
 	if err != nil {
-		return fmt.Errorf("negative internal request (unauthorized service) failed: %w", err)
+		return fmt.Errorf("negative internal request (registered owfms service) failed: %w", err)
 	}
 	if !statusMatches("401|403", unauthServiceResp.StatusCode) {
-		return fmt.Errorf("negative internal request (unauthorized service) expected 401/403 access denied, got %d. Body: %s",
+		return fmt.Errorf("negative internal request (registered owfms service) expected 401/403 access denied, got %d. Body: %s",
 			unauthServiceResp.StatusCode, string(unauthServiceResp.Body))
 	}
 
@@ -349,13 +346,10 @@ func sanitizeSubtestName(s string) string {
 func TestInternalUserRoutesLive(t *testing.T) {
 	internalBaseURL := strings.TrimSpace(os.Getenv("OWSEC_INTERNAL_BASE_URL"))
 	internalName := strings.TrimSpace(os.Getenv("X_INTERNAL_NAME"))
-	if internalName == "" {
-		internalName = strings.TrimSpace(os.Getenv("OWSEC_INTERNAL_NAME"))
-	}
-	internalAPIKey := strings.TrimSpace(os.Getenv("OWSEC_INTERNAL_API_KEY"))
+	internalAPIKey := strings.TrimSpace(os.Getenv("X_API_KEY"))
 
 	if internalBaseURL == "" || internalName == "" || internalAPIKey == "" {
-		t.Fatalf("Live daemon verification failed: OWSEC_INTERNAL_BASE_URL, X_INTERNAL_NAME (or OWSEC_INTERNAL_NAME), and OWSEC_INTERNAL_API_KEY environment variables are required.")
+		t.Fatalf("Live daemon verification failed: OWSEC_INTERNAL_BASE_URL, X_INTERNAL_NAME, and X_API_KEY environment variables are required.")
 	}
 
 	tlsRootCA := os.Getenv("OW_RBAC_TLS_ROOT_CA")

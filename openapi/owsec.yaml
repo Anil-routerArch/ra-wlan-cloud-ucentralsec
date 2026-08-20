@@ -343,6 +343,9 @@ components:
         created:
           type: integer
           format: int64
+        createdBy:
+          type: string
+          readOnly: true
         validationURI:
           type: string
         changePassword:

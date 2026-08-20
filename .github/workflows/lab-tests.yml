@@ -185,8 +185,8 @@ jobs:
           docker logs owsec
           exit 1
 
-      # ── 6. Publish Kafka service join event for owprov ───────────────────────
-      - name: Publish owprov Kafka join event
+      # ── 6. Publish Kafka service join events for owprov and owfms ───────────
+      - name: Publish owprov and owfms Kafka join events
         run: |
           set -euo pipefail
 
@@ -195,8 +195,13 @@ jobs:
             --bootstrap-server localhost:9092 \
             --topic service_events
 
-          echo "Published owprov service join event to Kafka."
-          echo "Waiting for owsec to consume service join event..."
+          echo '{"event":"join","id":2,"type":"owfms","privateEndPoint":"https://localhost:17004","publicEndPoint":"https://localhost:16004","key":"testkey","version":"1.0.0"}' | \
+            docker exec -i kafka /opt/kafka/bin/kafka-console-producer.sh \
+            --bootstrap-server localhost:9092 \
+            --topic service_events
+
+          echo "Published owprov and owfms service join events to Kafka."
+          echo "Waiting for owsec to consume service join events..."
           sleep 5
 
       # ── 7. Execute Mandatory Live Integration Tests ─────────────────────────
@@ -212,8 +217,8 @@ jobs:
           set -euo pipefail
 
           # Compute owsec's internal API key (SHA-256 of public URI) instantaneously
-          export OWSEC_INTERNAL_API_KEY=$(echo -n "https://localhost:16001" | sha256sum | awk '{print $1}')
-          echo "[INFO] Using computed OWSEC_INTERNAL_API_KEY: ${OWSEC_INTERNAL_API_KEY}"
+          export X_API_KEY=$(echo -n "https://localhost:16001" | sha256sum | awk '{print $1}')
+          echo "[INFO] Using computed X_API_KEY: ${X_API_KEY}"
 
           cd tests/integration
           go test -v -run TestInternalUserRoutesLive ./...

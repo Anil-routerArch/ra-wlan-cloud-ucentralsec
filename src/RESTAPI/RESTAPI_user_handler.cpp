@@ -354,6 +354,7 @@ namespace OpenWifi {
 			return BadRequest(RESTAPI::Errors::InvalidUserRole);
 		}
 
+		NewUser.createdBy.clear();
 		NewUser.createdBy = UserInfo_.userinfo.id;
 		if (UserInfo_.userinfo.userRole == SecurityObjects::ROOT) {
 			NewUser.owner = GetParameter("entity", "");
