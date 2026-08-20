@@ -11,7 +11,9 @@
 #include "SMTPMailerService.h"
 #include "StorageService.h"
 #include "TotpCache.h"
+#include "framework/MicroService.h"
 #include "framework/MicroServiceFuncs.h"
+#include "framework/MicroServiceNames.h"
 #include "framework/ow_constants.h"
 
 #include <algorithm>
@@ -254,6 +256,18 @@ namespace OpenWifi {
 			NewUserInfo.to_json(ModifiedObject);
 			return true;
 		}
+
+		static bool IsOwprovRequester(const std::string &RequesterStr) {
+			if (RequesterStr.empty()) {
+				return false;
+			}
+			for (const auto &Svc : MicroServiceGetServices(uSERVICE_PROVISIONING)) {
+				if (RequesterStr == Svc.PrivateEndPoint) {
+					return true;
+				}
+			}
+			return false;
+		}
 	}
 
 	void RESTAPI_user_handler::DoGet() {
@@ -261,6 +275,15 @@ namespace OpenWifi {
 		std::string Id = GetBinding("id", "");
 		if (Id.empty()) {
 			return BadRequest(RESTAPI::Errors::MissingUserID);
+		}
+
+		if (Internal_) {
+			if (!IsOwprovRequester(Requester())) {
+				Logger_.information(fmt::format(
+					"RESTAPI_user_handler::DoGet - Internal access denied for requester: {}",
+					Requester()));
+				return UnAuthorized(RESTAPI::Errors::ACCESS_DENIED);
+			}
 		}
 
 		Poco::toLowerInPlace(Id);
@@ -274,7 +297,7 @@ namespace OpenWifi {
 			return NotFound();
 		}
 
-		if (!ACLProcessor::CanReadUserRecord(UserInfo_.userinfo, UInfo)) {
+		if (!Internal_ && !ACLProcessor::CanReadUserRecord(UserInfo_.userinfo, UInfo)) {
 			return UnAuthorized(RESTAPI::Errors::ACCESS_DENIED);
 		}
 
@@ -331,6 +354,7 @@ namespace OpenWifi {
 			return BadRequest(RESTAPI::Errors::InvalidUserRole);
 		}
 
+		NewUser.createdBy.clear();
 		NewUser.createdBy = UserInfo_.userinfo.id;
 		if (UserInfo_.userinfo.userRole == SecurityObjects::ROOT) {
 			NewUser.owner = GetParameter("entity", "");

@@ -174,6 +174,7 @@ namespace OpenWifi {
 		try {
 			return GetRecord("id", Id, User);
 		} catch (const Poco::Exception &E) {
+			Logger().error(fmt::format("GetUserById EXCEPTION for Id={}: {}", Id, E.displayText()));
 			Logger().log(E);
 		}
 		return false;

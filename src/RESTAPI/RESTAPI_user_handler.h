@@ -13,11 +13,13 @@ namespace OpenWifi {
 							 RESTAPI_GenericServerAccounting &Server, uint64_t TransactionId,
 							 bool Internal)
 			: RESTAPIHandler(bindings, L,
-							 std::vector<std::string>{Poco::Net::HTTPRequest::HTTP_POST,
-													  Poco::Net::HTTPRequest::HTTP_GET,
-													  Poco::Net::HTTPRequest::HTTP_PUT,
-													  Poco::Net::HTTPRequest::HTTP_DELETE,
-													  Poco::Net::HTTPRequest::HTTP_OPTIONS},
+							 Internal ? std::vector<std::string>{Poco::Net::HTTPRequest::HTTP_GET,
+																  Poco::Net::HTTPRequest::HTTP_OPTIONS}
+									  : std::vector<std::string>{Poco::Net::HTTPRequest::HTTP_POST,
+																  Poco::Net::HTTPRequest::HTTP_GET,
+																  Poco::Net::HTTPRequest::HTTP_PUT,
+																  Poco::Net::HTTPRequest::HTTP_DELETE,
+																  Poco::Net::HTTPRequest::HTTP_OPTIONS},
 							 Server, TransactionId, Internal) {}
 		static auto PathName() { return std::list<std::string>{"/api/v1/user/{id}"}; };
 		void DoGet() final;

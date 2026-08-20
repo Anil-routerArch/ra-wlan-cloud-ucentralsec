@@ -5,11 +5,16 @@ ARG VALIJASON_VERSION=tip-v1
 
 FROM debian:$DEBIAN_VERSION AS build-base
 
-RUN apt-get update && apt-get install --no-install-recommends -y \
+RUN apt-get update && (apt-get install --no-install-recommends -y \
     make cmake g++ git curl zip unzip pkg-config \
     libpq-dev libmariadb-dev libmariadbclient-dev-compat \
     librdkafka-dev libboost-all-dev libssl-dev \
-    zlib1g-dev ca-certificates libcurl4-openssl-dev libfmt-dev
+    zlib1g-dev ca-certificates libcurl4-openssl-dev libfmt-dev || \
+    (sleep 5 && apt-get update && apt-get install --no-install-recommends --fix-missing -y \
+    make cmake g++ git curl zip unzip pkg-config \
+    libpq-dev libmariadb-dev libmariadbclient-dev-compat \
+    librdkafka-dev libboost-all-dev libssl-dev \
+    zlib1g-dev ca-certificates libcurl4-openssl-dev libfmt-dev))
 
 FROM build-base AS poco-build
 

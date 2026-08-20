@@ -59,6 +59,14 @@ func NewHTTPClient(tlsRootCA string) (*http.Client, error) {
 	httpClient := &http.Client{
 		Timeout: 30 * time.Second,
 	}
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+
+	if envBool("OW_ALLOW_INSECURE_TLS") {
+		tr.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+		httpClient.Transport = tr
+		return httpClient, nil
+	}
+
 	if strings.TrimSpace(tlsRootCA) == "" {
 		return httpClient, nil
 	}

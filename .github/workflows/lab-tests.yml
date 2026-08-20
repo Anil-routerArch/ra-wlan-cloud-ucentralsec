@@ -1,0 +1,237 @@
+name: Lab & RBAC Integration Tests
+
+on:
+  push:
+    branches:
+      - main
+      - anil-feature-sec
+  pull_request:
+    branches:
+      - main
+      - anil-feature-sec
+      - 'release/*'
+  workflow_dispatch:
+
+jobs:
+  lab-tests:
+    name: Run Lab Integration Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      # ── 1. Build Docker Image First ─────────────────────────────────────────
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build owsec Docker Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          load: true
+          tags: owsec:test
+
+      # ── 2. Start Kafka (KRaft mode, no ZooKeeper) ───────────────────────────
+      - name: Start Kafka
+        run: |
+          set -euo pipefail
+
+          docker run -d \
+            --name kafka \
+            --network host \
+            -e KAFKA_NODE_ID=1 \
+            -e KAFKA_PROCESS_ROLES=broker,controller \
+            -e KAFKA_LISTENERS=PLAINTEXT://:9092,CONTROLLER://:9093 \
+            -e KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://localhost:9092 \
+            -e KAFKA_CONTROLLER_LISTENER_NAMES=CONTROLLER \
+            -e KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT \
+            -e KAFKA_CONTROLLER_QUORUM_VOTERS=1@localhost:9093 \
+            -e KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1 \
+            -e KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR=1 \
+            -e KAFKA_TRANSACTION_STATE_LOG_MIN_ISR=1 \
+            apache/kafka:3.7.1
+
+          echo "Waiting for Kafka to be ready..."
+
+          for i in {1..30}; do
+            if docker exec kafka /opt/kafka/bin/kafka-topics.sh \
+              --bootstrap-server localhost:9092 \
+              --list > /dev/null 2>&1; then
+              echo "Kafka is ready!"
+              exit 0
+            fi
+
+            echo "attempt $i/30..."
+            sleep 2
+          done
+
+          echo "ERROR: Kafka did not start in time!"
+          docker logs kafka | tail -100
+          exit 1
+
+      # ── 3. Create Kafka service_events Topic ───────────────────────────────
+      - name: Create Kafka service_events topic
+        run: |
+          docker exec kafka /opt/kafka/bin/kafka-topics.sh \
+            --bootstrap-server localhost:9092 \
+            --create --topic service_events \
+            --partitions 1 --replication-factor 1 \
+            --if-not-exists
+
+      # ── 4. Generate Certificates & Prepare runtime data ─────────────────────
+      # ── Prepare owsec runtime data ─────────────────────────────────────────
+      - name: Prepare owsec runtime data
+        run: |
+          set -euo pipefail
+
+          mkdir -p /tmp/owsec-data/certs
+          mkdir -p /tmp/owsec-data/data
+
+          cat > /tmp/owsec-data/data/registry.json <<'EOF'
+          {}
+          EOF
+
+          openssl req \
+            -x509 \
+            -nodes \
+            -days 1 \
+            -newkey rsa:2048 \
+            -keyout /tmp/owsec-data/certs/restapi-key.pem \
+            -out /tmp/owsec-data/certs/restapi-cert.pem \
+            -subj "/CN=localhost"
+
+          openssl rsa -in /tmp/owsec-data/certs/restapi-key.pem -pubout \
+            -out /tmp/owsec-data/certs/restapi-public.pem
+
+          cp /tmp/owsec-data/certs/restapi-cert.pem \
+            /tmp/owsec-data/certs/restapi-ca.pem
+
+          chmod 644 /tmp/owsec-data/certs/restapi-key.pem
+          chmod 644 /tmp/owsec-data/certs/restapi-cert.pem
+          chmod 644 /tmp/owsec-data/certs/restapi-ca.pem
+          chmod 644 /tmp/owsec-data/certs/restapi-public.pem
+
+          chmod 777 /tmp/owsec-data/data
+          chmod 666 /tmp/owsec-data/data/registry.json
+
+          echo "registry.json:"
+          cat /tmp/owsec-data/data/registry.json
+
+      # ── 5. Start owsec Container ────────────────────────────────────────────
+      - name: Start owsec container
+        run: |
+          set -euo pipefail
+
+          docker run -d \
+            --name owsec \
+            --network host \
+            -v /tmp/owsec-data/certs:/owsec-data/certs:ro \
+            -v /tmp/owsec-data/data:/owsec-data/data \
+            -e TEMPLATE_CONFIG=true \
+            -e KAFKA_ENABLE=true \
+            -e KAFKA_BROKERLIST=localhost:9092 \
+            -e STORAGE_TYPE=sqlite \
+            -e RESTAPI_HOST_PORT=16001 \
+            -e INTERNAL_RESTAPI_HOST_PORT=17001 \
+            owsec:test
+
+          echo "=== Container Status Log ==="
+          docker inspect --format='Container ID: {{.Id}} | State: {{.State.Status}} | Running: {{.State.Running}}' owsec
+
+          echo "=== Container Certificate Finding Log ==="
+          if docker exec owsec test -f /owsec-data/certs/restapi-key.pem && docker exec owsec test -f /owsec-data/certs/restapi-cert.pem; then
+            echo "[SUCCESS] Key files found inside owsec container at /owsec-data/certs/:"
+            docker exec owsec ls -la /owsec-data/certs/
+          else
+            echo "[ERROR] Key files NOT found inside container at /owsec-data/certs/!"
+          fi
+
+          echo "=== Generated Configuration Log ==="
+          docker exec owsec cat /openwifi/owsec.properties 2>/dev/null || docker exec owsec cat /owsec-data/owsec.properties 2>/dev/null || true
+
+          echo "Waiting for owsec daemon to start on port 16001 / 17001..."
+
+          for i in {1..40}; do
+            if curl -k -s --max-time 3 "https://localhost:16001/api/v1/system?command=info" > /dev/null 2>&1 || \
+               curl -k -s --max-time 3 "https://localhost:17001/api/v1/system?command=info" > /dev/null 2>&1; then
+              echo "[SUCCESS] owsec HTTPS endpoint is reachable!"
+              echo "=== Endpoint Info Response Payload ==="
+              curl -k -s "https://localhost:16001/api/v1/system?command=info" || curl -k -s "https://localhost:17001/api/v1/system?command=info" || true
+              echo ""
+              echo "=== owsec Daemon Process Status ==="
+              docker exec owsec ps aux || true
+              exit 0
+            fi
+
+            if ! docker inspect -f '{{.State.Running}}' owsec 2>/dev/null | grep -q true; then
+              echo "ERROR: owsec container exited!"
+              docker logs owsec
+              exit 1
+            fi
+
+            echo "attempt $i/40..."
+            sleep 3
+          done
+
+          echo "ERROR: owsec daemon did not start in time!"
+          docker logs owsec
+          exit 1
+
+      # ── 6. Publish Kafka service join events for owprov and owfms ───────────
+      - name: Publish owprov and owfms Kafka join events
+        run: |
+          set -euo pipefail
+
+          echo '{"event":"join","id":1,"type":"owprov","privateEndPoint":"https://localhost:17005","publicEndPoint":"https://localhost:16005","key":"testkey","version":"1.0.0"}' | \
+            docker exec -i kafka /opt/kafka/bin/kafka-console-producer.sh \
+            --bootstrap-server localhost:9092 \
+            --topic service_events
+
+          echo '{"event":"join","id":2,"type":"owfms","privateEndPoint":"https://localhost:17004","publicEndPoint":"https://localhost:16004","key":"testkey","version":"1.0.0"}' | \
+            docker exec -i kafka /opt/kafka/bin/kafka-console-producer.sh \
+            --bootstrap-server localhost:9092 \
+            --topic service_events
+
+          echo "Published owprov and owfms service join events to Kafka."
+          echo "Waiting for owsec to consume service join events..."
+          sleep 5
+
+      # ── 7. Execute Mandatory Live Integration Tests ─────────────────────────
+      - name: Execute Mandatory Live Internal Route Security Tests
+        env:
+          OWSEC_BASE_URL: https://127.0.0.1:16001/api/v1
+          OWSEC_INTERNAL_BASE_URL: https://127.0.0.1:17001/api/v1
+          X_INTERNAL_NAME: https://localhost:17005
+          OWSEC_ROOT_ID: 11111111-0000-0000-6666-999999999999
+          OW_RBAC_TLS_ROOT_CA: /tmp/owsec-data/certs/restapi-ca.pem
+          OW_ALLOW_INSECURE_TLS: "true"
+        run: |
+          set -euo pipefail
+
+          # Compute owsec's internal API key (SHA-256 of public URI) instantaneously
+          export X_API_KEY=$(echo -n "https://localhost:16001" | sha256sum | awk '{print $1}')
+          echo "[INFO] Using computed X_API_KEY: ${X_API_KEY}"
+
+          cd tests/integration
+          go test -v -run TestInternalUserRoutesLive ./...
+
+      # ── 8. Dump owsec container logs on failure ────────────────────────────
+      - name: Dump owsec container logs on failure
+        if: failure()
+        run: |
+          echo "=== Full owsec Container Logs ==="
+          docker logs owsec --tail 500 || true
+          echo "=== Container Environment Variables ==="
+          docker exec owsec env || true
+          echo "=== Generated owsec.properties Configuration ==="
+          docker exec owsec cat /openwifi/owsec.properties || true
+          echo "=== Host Data Directory Diagnostics ==="
+          ls -la /tmp/owsec-data/certs/ /tmp/owsec-data/data/ || true
