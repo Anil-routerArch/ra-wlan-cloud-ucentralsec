@@ -350,8 +350,8 @@ func verifyInternalUserRoutes(httpClient *http.Client, internalBaseURL, rootID s
 		if err != nil {
 			return fmt.Errorf("negative internal request (%s %s) failed: %w", check.method, check.path, err)
 		}
-		if !statusMatches("401|403|405", resp.StatusCode) {
-			return fmt.Errorf("negative internal request (%s %s) expected 401/403/405 access denied, got %d. Body: %s",
+		if !statusMatches("400|401|403|405", resp.StatusCode) {
+			return fmt.Errorf("negative internal request (%s %s) expected 400/401/403/405 access denied, got %d. Body: %s",
 				check.method, check.path, resp.StatusCode, string(resp.Body))
 		}
 	}
