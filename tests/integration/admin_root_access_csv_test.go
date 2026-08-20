@@ -239,7 +239,10 @@ func verifyInternalUserRoutes(httpClient *http.Client, internalBaseURL, rootID s
 		return fmt.Errorf("rootID is required for internal route verification")
 	}
 
-	internalName := strings.TrimSpace(os.Getenv("OWSEC_INTERNAL_NAME"))
+	internalName := strings.TrimSpace(os.Getenv("X_INTERNAL_NAME"))
+	if internalName == "" {
+		internalName = strings.TrimSpace(os.Getenv("OWSEC_INTERNAL_NAME"))
+	}
 	internalAPIKey := strings.TrimSpace(os.Getenv("OWSEC_INTERNAL_API_KEY"))
 	if internalName == "" || internalAPIKey == "" {
 		return nil
@@ -345,11 +348,14 @@ func sanitizeSubtestName(s string) string {
 // against a live ucentralsec C++ daemon instance when configured via environment variables.
 func TestInternalUserRoutesLive(t *testing.T) {
 	internalBaseURL := strings.TrimSpace(os.Getenv("OWSEC_INTERNAL_BASE_URL"))
-	internalName := strings.TrimSpace(os.Getenv("OWSEC_INTERNAL_NAME"))
+	internalName := strings.TrimSpace(os.Getenv("X_INTERNAL_NAME"))
+	if internalName == "" {
+		internalName = strings.TrimSpace(os.Getenv("OWSEC_INTERNAL_NAME"))
+	}
 	internalAPIKey := strings.TrimSpace(os.Getenv("OWSEC_INTERNAL_API_KEY"))
 
 	if internalBaseURL == "" || internalName == "" || internalAPIKey == "" {
-		t.Fatalf("Live daemon verification failed: OWSEC_INTERNAL_BASE_URL, OWSEC_INTERNAL_NAME, and OWSEC_INTERNAL_API_KEY environment variables are required.")
+		t.Fatalf("Live daemon verification failed: OWSEC_INTERNAL_BASE_URL, X_INTERNAL_NAME (or OWSEC_INTERNAL_NAME), and OWSEC_INTERNAL_API_KEY environment variables are required.")
 	}
 
 	tlsRootCA := os.Getenv("OW_RBAC_TLS_ROOT_CA")
