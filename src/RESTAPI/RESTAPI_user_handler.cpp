@@ -261,9 +261,6 @@ namespace OpenWifi {
 			if (RequesterStr.empty()) {
 				return false;
 			}
-			if (RequesterStr == uSERVICE_PROVISIONING) {
-				return true;
-			}
 			for (const auto &Svc : MicroServiceGetServices(uSERVICE_PROVISIONING)) {
 				if (RequesterStr == Svc.PublicEndPoint || RequesterStr == Svc.PrivateEndPoint) {
 					return true;
