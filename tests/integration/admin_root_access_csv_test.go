@@ -306,7 +306,57 @@ func verifyInternalUserRoutes(httpClient *http.Client, internalBaseURL, rootID s
 			unauthServiceResp.StatusCode, string(unauthServiceResp.Body))
 	}
 
-	// 4. Negative Internal Auth Check: Invalid API Key + Authorized Service Name
+	// 4. Negative Internal Auth Check: Valid API Key + Completely Unregistered / Unknown Service URL
+	unregisteredSvcResp, err := internalClient.doWithHeaders("", http.MethodGet, "/api/v1/user/"+url.PathEscape(rootID), "", map[string]string{
+		"X-INTERNAL-NAME": "https://unknown-service-domain:9999", // unregistered service URL
+		"X-API-KEY":       internalAPIKey,
+	})
+	if err != nil {
+		return fmt.Errorf("negative internal request (unregistered service) failed: %w", err)
+	}
+	if !statusMatches("401|403", unregisteredSvcResp.StatusCode) {
+		return fmt.Errorf("negative internal request (unregistered service) expected 401/403 access denied, got %d. Body: %s",
+			unregisteredSvcResp.StatusCode, string(unregisteredSvcResp.Body))
+	}
+
+	// 5. Negative Internal Auth Check: Valid API Key + owprov Public Endpoint (Private Endpoint Only Hardening)
+	publicEndpointResp, err := internalClient.doWithHeaders("", http.MethodGet, "/api/v1/user/"+url.PathEscape(rootID), "", map[string]string{
+		"X-INTERNAL-NAME": "https://localhost:16005", // owprov public endpoint (not private endpoint)
+		"X-API-KEY":       internalAPIKey,
+	})
+	if err != nil {
+		return fmt.Errorf("negative internal request (owprov public endpoint) failed: %w", err)
+	}
+	if !statusMatches("401|403", publicEndpointResp.StatusCode) {
+		return fmt.Errorf("negative internal request (owprov public endpoint) expected 401/403 access denied, got %d. Body: %s",
+			publicEndpointResp.StatusCode, string(publicEndpointResp.Body))
+	}
+
+	// 6. Negative Internal Auth Check: Non-GET HTTP Methods (POST, PUT, DELETE) on Internal User Routes
+	methodChecks := []struct {
+		method string
+		path   string
+		body   string
+	}{
+		{method: http.MethodPost, path: "/api/v1/user/0", body: `{"name":"test"}`},
+		{method: http.MethodPut, path: "/api/v1/user/" + url.PathEscape(rootID), body: `{"name":"test"}`},
+		{method: http.MethodDelete, path: "/api/v1/user/" + url.PathEscape(rootID), body: ""},
+	}
+	for _, check := range methodChecks {
+		resp, err := internalClient.doWithHeaders("", check.method, check.path, check.body, map[string]string{
+			"X-INTERNAL-NAME": internalName,
+			"X-API-KEY":       internalAPIKey,
+		})
+		if err != nil {
+			return fmt.Errorf("negative internal request (%s %s) failed: %w", check.method, check.path, err)
+		}
+		if !statusMatches("401|403|405", resp.StatusCode) {
+			return fmt.Errorf("negative internal request (%s %s) expected 401/403/405 access denied, got %d. Body: %s",
+				check.method, check.path, resp.StatusCode, string(resp.Body))
+		}
+	}
+
+	// 7. Negative Internal Auth Check: Invalid API Key + Authorized Service Name
 	invalidKeyResp, err := internalClient.doWithHeaders("", http.MethodGet, "/api/v1/user/"+url.PathEscape(rootID), "", map[string]string{
 		"X-INTERNAL-NAME": internalName,
 		"X-API-KEY":       "invalid-key-12345",
@@ -319,7 +369,7 @@ func verifyInternalUserRoutes(httpClient *http.Client, internalBaseURL, rootID s
 			invalidKeyResp.StatusCode, string(invalidKeyResp.Body))
 	}
 
-	// 5. Negative Internal Auth Check: Unauthenticated (Missing Headers)
+	// 8. Negative Internal Auth Check: Unauthenticated (Missing Headers)
 	noAuthResp, err := internalClient.doWithHeaders("", http.MethodGet, "/api/v1/user/"+url.PathEscape(rootID), "", map[string]string{})
 	if err != nil {
 		return fmt.Errorf("negative internal request (unauthenticated) failed: %w", err)
