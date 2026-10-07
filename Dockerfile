@@ -70,7 +70,6 @@ RUN git clone --depth 1 --branch ${VCPKG_VERSION} https://github.com/microsoft/v
     sed -i 's/set(VCPKG_LIBRARY.*/set(VCPKG_LIBRARY_LINKAGE dynamic)/g' /vcpkg/custom-triplets/x64-linux.cmake && \
     echo 'set(VCPKG_C_FLAGS "${VCPKG_C_FLAGS}")' >> /vcpkg/custom-triplets/x64-linux.cmake && \
     echo 'set(VCPKG_CXX_FLAGS "${VCPKG_CXX_FLAGS} -Wno-error=dangling-reference -Wno-dangling-reference")' >> /vcpkg/custom-triplets/x64-linux.cmake && \
-    sed -i 's/OPTIONS/OPTIONS -DENABLE_WERROR=OFF/g' /vcpkg/ports/aws-sdk-cpp/portfile.cmake && \
     ./vcpkg/vcpkg install aws-sdk-cpp[sns]:x64-linux json-schema-validator:x64-linux --overlay-triplets=/vcpkg/custom-triplets --overlay-ports=/owsec/overlays
 
 COPY --from=poco-build /usr/local/include /usr/local/include
