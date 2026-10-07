@@ -21,6 +21,13 @@ namespace OpenWifi {
 		auto nameSearch = GetParameter("nameSearch");
 		auto emailSearch = GetParameter("emailSearch");
 
+		if (Internal_ && Request->has("X-INTERNAL-NAME")) {
+			Logger_.information(fmt::format(
+				"RESTAPI_users_handler::DoGet - Service-key access ({}) not supported for /users. User bearer token required.",
+				Requester()));
+			return UnAuthorized(RESTAPI::Errors::ACCESS_DENIED);
+		}
+
 		if (!IsAdminUserCaller(UserInfo_.userinfo)) {
 			return UnAuthorized(RESTAPI::Errors::ACCESS_DENIED);
 		}
