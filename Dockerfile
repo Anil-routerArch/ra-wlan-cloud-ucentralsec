@@ -1,21 +1,17 @@
-ARG DEBIAN_VERSION=11.5-slim
+ARG DEBIAN_VERSION=13-slim
 ARG POCO_VERSION=poco-tip-v2
 ARG CPPKAFKA_VERSION=tip-v1
 ARG VALIJASON_VERSION=tip-v1
 
 FROM debian:$DEBIAN_VERSION AS build-base
 
-RUN sed -i '/bullseye-security/d' /etc/apt/sources.list && \
-    apt-get update && (apt-get install --no-install-recommends -y \
+RUN apt-get -o Acquire::Retries=5 update && \
+    apt-get -o Acquire::Retries=5 install --no-install-recommends -y \
     make cmake g++ git curl zip unzip pkg-config \
-    libpq-dev libmariadb-dev libmariadbclient-dev-compat \
+    libpq-dev libmariadb-dev libmariadb-dev-compat \
     librdkafka-dev libboost-all-dev libssl-dev \
-    zlib1g-dev ca-certificates libcurl4-openssl-dev libfmt-dev || \
-    (sleep 5 && apt-get update && apt-get install --no-install-recommends --fix-missing -y \
-    make cmake g++ git curl zip unzip pkg-config \
-    libpq-dev libmariadb-dev libmariadbclient-dev-compat \
-    librdkafka-dev libboost-all-dev libssl-dev \
-    zlib1g-dev ca-certificates libcurl4-openssl-dev libfmt-dev))
+    zlib1g-dev ca-certificates libcurl4-openssl-dev libfmt-dev && \
+    rm -rf /var/lib/apt/lists/*
 
 FROM build-base AS poco-build
 
@@ -72,12 +68,17 @@ RUN git clone --depth 1 --branch ${VCPKG_VERSION} https://github.com/microsoft/v
     mkdir /vcpkg/custom-triplets && \
     cp /vcpkg/triplets/x64-linux.cmake /vcpkg/custom-triplets/x64-linux.cmake && \
     sed -i 's/set(VCPKG_LIBRARY.*/set(VCPKG_LIBRARY_LINKAGE dynamic)/g' /vcpkg/custom-triplets/x64-linux.cmake && \
+    echo 'set(VCPKG_C_FLAGS "${VCPKG_C_FLAGS}")' >> /vcpkg/custom-triplets/x64-linux.cmake && \
+    echo 'set(VCPKG_CXX_FLAGS "${VCPKG_CXX_FLAGS} -Wno-error=dangling-reference -Wno-dangling-reference")' >> /vcpkg/custom-triplets/x64-linux.cmake && \
+    sed -i 's/OPTIONS/OPTIONS -DENABLE_WERROR=OFF/g' /vcpkg/ports/aws-sdk-cpp/portfile.cmake && \
     ./vcpkg/vcpkg install aws-sdk-cpp[sns]:x64-linux json-schema-validator:x64-linux --overlay-triplets=/vcpkg/custom-triplets --overlay-ports=/owsec/overlays
 
 COPY --from=poco-build /usr/local/include /usr/local/include
 COPY --from=poco-build /usr/local/lib /usr/local/lib
 COPY --from=cppkafka-build /usr/local/include /usr/local/include
 COPY --from=cppkafka-build /usr/local/lib /usr/local/lib
+
+RUN ldconfig
 
 WORKDIR /owsec
 RUN mkdir cmake-build
@@ -97,10 +98,11 @@ RUN mkdir /openwifi
 RUN mkdir -p "$OWSEC_ROOT" "$OWSEC_CONFIG" && \
     chown "$OWSEC_USER": "$OWSEC_ROOT" "$OWSEC_CONFIG"
 
-RUN sed -i '/bullseye-security/d' /etc/apt/sources.list && \
-    apt-get update && apt-get install --no-install-recommends -y \
+RUN apt-get -o Acquire::Retries=5 update && \
+    apt-get -o Acquire::Retries=5 install --no-install-recommends -y \
     librdkafka++1 gosu gettext ca-certificates bash jq curl wget \
-    libmariadb-dev-compat libpq5 postgresql-client libfmt7
+    libmariadb3 libpq5 postgresql-client libfmt10 tzdata && \
+    rm -rf /var/lib/apt/lists/*
 
 COPY readiness_check /readiness_check
 COPY test_scripts/curl/cli /cli

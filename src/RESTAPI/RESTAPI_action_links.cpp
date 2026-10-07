@@ -307,7 +307,7 @@ namespace OpenWifi {
 				Response->stringify(ooo);
 			Logger().information(fmt::format(
 				"({}): Completed subscriber e-mail verification. Provisioning notified, Error={}.",
-				UInfo.email, Status));
+				UInfo.email, (int)Status));
 			AddGlobalVars(FormVars);
 			SendHTMLFileBack(FormFile, FormVars);
 			Logger().information(fmt::format(
