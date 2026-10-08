@@ -55,7 +55,7 @@ namespace OpenWifi {
 			}
 
 			if (userToken.empty()) {
-				return BadRequest(RESTAPI::Errors::MissingOrInvalidParameters);
+				return UnAuthorized(RESTAPI::Errors::INVALID_TOKEN);
 			}
 
 			bool Expired = false;

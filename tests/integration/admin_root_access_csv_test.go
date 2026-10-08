@@ -786,8 +786,8 @@ func verifyInternalUsersPluralRoutes(t *testing.T, httpClient *http.Client, base
 		}
 	})
 
-	// 2. Internal port + service-key without Authorization header -> 400 Bad Request
-	t.Run("Internal_ServiceKey_MissingToken_400", func(t *testing.T) {
+	// 2. Internal port + service-key without Authorization header -> 401/403 Denied
+	t.Run("Internal_ServiceKey_MissingToken_Denied", func(t *testing.T) {
 		resp, err := internalClient.doWithHeaders("", http.MethodGet, "/api/v1/users", "", map[string]string{
 			"X-INTERNAL-NAME": internalName,
 			"X-API-KEY":       internalAPIKey,
@@ -795,13 +795,13 @@ func verifyInternalUsersPluralRoutes(t *testing.T, httpClient *http.Client, base
 		if err != nil {
 			t.Fatalf("request failed: %v", err)
 		}
-		if resp.StatusCode != http.StatusBadRequest {
-			t.Fatalf("expected HTTP 400 for service-key call without token, got %d. Body: %s", resp.StatusCode, string(resp.Body))
+		if !statusMatches("401|403", resp.StatusCode) {
+			t.Fatalf("expected HTTP 401/403 for service-key call without token, got %d. Body: %s", resp.StatusCode, string(resp.Body))
 		}
 	})
 
-	// 2b. Internal port + service-key + raw token without Bearer scheme -> 400 Bad Request
-	t.Run("Internal_ServiceKey_TokenWithoutBearerScheme_400", func(t *testing.T) {
+	// 2b. Internal port + service-key + raw token without Bearer scheme -> 401/403 Denied
+	t.Run("Internal_ServiceKey_TokenWithoutBearerScheme_Denied", func(t *testing.T) {
 		resp, err := internalClient.doWithHeaders("", http.MethodGet, "/api/v1/users", "", map[string]string{
 			"X-INTERNAL-NAME": internalName,
 			"X-API-KEY":       internalAPIKey,
@@ -810,8 +810,8 @@ func verifyInternalUsersPluralRoutes(t *testing.T, httpClient *http.Client, base
 		if err != nil {
 			t.Fatalf("request failed: %v", err)
 		}
-		if resp.StatusCode != http.StatusBadRequest {
-			t.Fatalf("expected HTTP 400 for Authorization header without Bearer scheme, got %d. Body: %s", resp.StatusCode, string(resp.Body))
+		if !statusMatches("401|403", resp.StatusCode) {
+			t.Fatalf("expected HTTP 401/403 for Authorization header without Bearer scheme, got %d. Body: %s", resp.StatusCode, string(resp.Body))
 		}
 	})
 
@@ -834,8 +834,7 @@ func verifyInternalUsersPluralRoutes(t *testing.T, httpClient *http.Client, base
 	t.Run("Internal_ServiceKey_ExpiredToken_Denied", func(t *testing.T) {
 		expiredToken, cleanup, err := createExpiredTokenInDB(rootID)
 		if err != nil {
-			t.Logf("skipping expired token verification (DB manipulation unavailable): %v", err)
-			return
+			t.Fatalf("failed to prepare expired token fixture in database: %v", err)
 		}
 		defer cleanup()
 
