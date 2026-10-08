@@ -22,19 +22,6 @@ namespace OpenWifi {
 		auto emailSearch = GetParameter("emailSearch");
 		auto createdBy = GetParameter("createdBy");
 
-		if (Internal_) {
-			// On the internal router, allow authenticated microservices (via X-INTERNAL-NAME)
-			// OR authenticated administrative users (via Bearer token).
-			if (!Request->has("X-INTERNAL-NAME") && !IsAdminUserCaller(UserInfo_.userinfo)) {
-				return UnAuthorized(RESTAPI::Errors::ACCESS_DENIED);
-			}
-		} else {
-			// On the public router, strictly require ROOT or ADMIN user token
-			if (!IsAdminUserCaller(UserInfo_.userinfo)) {
-				return UnAuthorized(RESTAPI::Errors::ACCESS_DENIED);
-			}
-		}
-
 		std::string baseQuery;
 		if (!nameSearch.empty() || !emailSearch.empty()) {
 			if (!nameSearch.empty())
@@ -49,13 +36,42 @@ namespace OpenWifi {
 		}
 
 		if (Internal_) {
-			if (!createdBy.empty()) {
-				auto Scope = fmt::format(" createdby='{}' ", ORM::Escape(createdBy));
-				baseQuery = baseQuery.empty() ? Scope : fmt::format("{} and {}", Scope, baseQuery);
+			// On the internal router, strictly require authenticated microservices (via X-INTERNAL-NAME)
+			if (!Request->has("X-INTERNAL-NAME")) {
+				return UnAuthorized(RESTAPI::Errors::ACCESS_DENIED);
 			}
-		} else if (UserInfo_.userinfo.userRole == SecurityObjects::ADMIN) {
-			auto AdminScope = fmt::format(" createdby='{}' ", ORM::Escape(UserInfo_.userinfo.id));
-			baseQuery = baseQuery.empty() ? AdminScope : fmt::format("{} and {}", AdminScope, baseQuery);
+
+			// Service-to-service calls must specify on whose behalf they are querying users (userId or createdBy)
+			auto targetUserId = GetParameter("userId", GetParameter("createdBy"));
+			if (targetUserId.empty()) {
+				return BadRequest(RESTAPI::Errors::MissingUserID);
+			}
+
+			SecurityObjects::UserInfo TargetUser;
+			if (!StorageService()->UserDB().GetUserById(targetUserId, TargetUser)) {
+				return NotFound();
+			}
+
+			if (TargetUser.userRole == SecurityObjects::ROOT) {
+				// ROOT scope: sees all users (no createdBy filter)
+			} else if (TargetUser.userRole == SecurityObjects::ADMIN) {
+				// ADMIN scope: only see users created by this admin
+				auto Scope = fmt::format(" createdby='{}' ", ORM::Escape(TargetUser.id));
+				baseQuery = baseQuery.empty() ? Scope : fmt::format("{} and {}", Scope, baseQuery);
+			} else {
+				// Non-admin callers (CSR, SUBSCRIBER, etc.) cannot list users
+				return UnAuthorized(RESTAPI::Errors::ACCESS_DENIED);
+			}
+		} else {
+			// On the public router, strictly require ROOT or ADMIN user token
+			if (!IsAdminUserCaller(UserInfo_.userinfo)) {
+				return UnAuthorized(RESTAPI::Errors::ACCESS_DENIED);
+			}
+
+			if (UserInfo_.userinfo.userRole == SecurityObjects::ADMIN) {
+				auto AdminScope = fmt::format(" createdby='{}' ", ORM::Escape(UserInfo_.userinfo.id));
+				baseQuery = baseQuery.empty() ? AdminScope : fmt::format("{} and {}", AdminScope, baseQuery);
+			}
 		}
 
 		if (QB_.Select.empty()) {

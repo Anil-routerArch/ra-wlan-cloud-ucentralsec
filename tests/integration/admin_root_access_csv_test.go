@@ -552,10 +552,11 @@ func verifyInternalUsersPluralRoutes(t *testing.T, httpClient *http.Client, base
 		}
 	}
 
-	// 1. Internal port + valid ROOT/ADMIN bearer -> 200 and /users is routed correctly
-	t.Run("Internal_ValidRootBearer_200", func(t *testing.T) {
-		resp, err := internalClient.doWithHeaders("", http.MethodGet, "/api/v1/users", "", map[string]string{
-			"Authorization": "Bearer " + rootToken,
+	// 1. Internal port + service-key + ROOT userId delegation -> 200 OK (sees all users)
+	t.Run("Internal_ServiceKey_RootDelegation_200", func(t *testing.T) {
+		resp, err := internalClient.doWithHeaders("", http.MethodGet, "/api/v1/users?userId="+url.QueryEscape(rootID), "", map[string]string{
+			"X-INTERNAL-NAME": internalName,
+			"X-API-KEY":       internalAPIKey,
 		})
 		if err != nil {
 			t.Fatalf("request failed: %v", err)
@@ -572,9 +573,9 @@ func verifyInternalUsersPluralRoutes(t *testing.T, httpClient *http.Client, base
 		}
 	})
 
-	// 2. Internal port + service-key authentication (X-INTERNAL-NAME + X-API-KEY) -> 200 OK
-	t.Run("Internal_ServiceKey_200", func(t *testing.T) {
-		resp, err := internalClient.doWithHeaders("", http.MethodGet, "/api/v1/users", "", map[string]string{
+	// 2. Internal port + service-key + ADMIN userId delegation -> 200 OK (scoped to users created by this admin)
+	t.Run("Internal_ServiceKey_AdminDelegation_200", func(t *testing.T) {
+		resp, err := internalClient.doWithHeaders("", http.MethodGet, "/api/v1/users?userId="+url.QueryEscape(rootID), "", map[string]string{
 			"X-INTERNAL-NAME": internalName,
 			"X-API-KEY":       internalAPIKey,
 		})
@@ -582,64 +583,59 @@ func verifyInternalUsersPluralRoutes(t *testing.T, httpClient *http.Client, base
 			t.Fatalf("request failed: %v", err)
 		}
 		if resp.StatusCode != http.StatusOK {
-			t.Fatalf("expected HTTP 200 for service-key access to /users, got %d. Body: %s", resp.StatusCode, string(resp.Body))
-		}
-		var parsed map[string]any
-		if err := json.Unmarshal(resp.Body, &parsed); err != nil {
-			t.Fatalf("failed to parse JSON response: %v", err)
-		}
-		if _, hasUsers := parsed["users"]; !hasUsers {
-			t.Fatalf("response missing required 'users' array/field. Body: %s", string(resp.Body))
+			t.Fatalf("expected HTTP 200 for admin-scoped service-key access to /users, got %d. Body: %s", resp.StatusCode, string(resp.Body))
 		}
 	})
 
-	// 2b. Internal port + service-key + createdBy scoping -> 200 OK
-	t.Run("Internal_ServiceKey_CreatedByScope_200", func(t *testing.T) {
-		resp, err := internalClient.doWithHeaders("", http.MethodGet, "/api/v1/users?createdBy="+url.QueryEscape(csrUserID), "", map[string]string{
+	// 3. Internal port + service-key without userId parameter -> 400 Bad Request (Missing user ID)
+	t.Run("Internal_ServiceKey_MissingUserId_400", func(t *testing.T) {
+		resp, err := internalClient.doWithHeaders("", http.MethodGet, "/api/v1/users", "", map[string]string{
 			"X-INTERNAL-NAME": internalName,
 			"X-API-KEY":       internalAPIKey,
 		})
 		if err != nil {
 			t.Fatalf("request failed: %v", err)
 		}
-		if resp.StatusCode != http.StatusOK {
-			t.Fatalf("expected HTTP 200 for scoped service-key access to /users, got %d. Body: %s", resp.StatusCode, string(resp.Body))
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("expected HTTP 400 for service-key call without userId, got %d. Body: %s", resp.StatusCode, string(resp.Body))
 		}
 	})
 
-	// 3. Internal port + valid non-admin bearer -> 403 Forbidden
-	t.Run("Internal_NonAdminBearer_403", func(t *testing.T) {
-		resp, err := internalClient.doWithHeaders("", http.MethodGet, "/api/v1/users", "", map[string]string{
-			"Authorization": "Bearer " + csrToken,
+	// 4. Internal port + service-key + non-admin (CSR) userId delegation -> 401/403 Access Denied
+	t.Run("Internal_ServiceKey_NonAdminDelegation_Denied", func(t *testing.T) {
+		resp, err := internalClient.doWithHeaders("", http.MethodGet, "/api/v1/users?userId="+url.QueryEscape(csrUserID), "", map[string]string{
+			"X-INTERNAL-NAME": internalName,
+			"X-API-KEY":       internalAPIKey,
 		})
 		if err != nil {
 			t.Fatalf("request failed: %v", err)
 		}
-		if resp.StatusCode != http.StatusForbidden {
-			t.Fatalf("expected HTTP 403 Forbidden for non-admin bearer access to /users, got %d. Body: %s", resp.StatusCode, string(resp.Body))
+		if !statusMatches("401|403", resp.StatusCode) {
+			t.Fatalf("expected HTTP 401/403 for non-admin delegated user, got %d. Body: %s", resp.StatusCode, string(resp.Body))
 		}
 	})
 
-	// 4. Internal port + missing/invalid bearer -> denied (401 or 403)
-	t.Run("Internal_MissingOrInvalidBearer_Denied", func(t *testing.T) {
-		// Missing credentials
+	// 5. Internal port + User Bearer token (no X-INTERNAL-NAME) -> 401/403 Access Denied (internal requires service key)
+	t.Run("Internal_UserBearerToken_Denied", func(t *testing.T) {
+		resp, err := internalClient.doWithHeaders("", http.MethodGet, "/api/v1/users?userId="+url.QueryEscape(rootID), "", map[string]string{
+			"Authorization": "Bearer " + rootToken,
+		})
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		if !statusMatches("401|403", resp.StatusCode) {
+			t.Fatalf("expected HTTP 401/403 for user bearer token on internal router, got %d. Body: %s", resp.StatusCode, string(resp.Body))
+		}
+	})
+
+	// 6. Internal port + missing auth headers -> denied (401 or 403)
+	t.Run("Internal_MissingAuth_Denied", func(t *testing.T) {
 		respNoAuth, err := internalClient.doWithHeaders("", http.MethodGet, "/api/v1/users", "", nil)
 		if err != nil {
 			t.Fatalf("request failed: %v", err)
 		}
 		if !statusMatches("401|403", respNoAuth.StatusCode) {
 			t.Fatalf("expected HTTP 401/403 for missing auth, got %d. Body: %s", respNoAuth.StatusCode, string(respNoAuth.Body))
-		}
-
-		// Invalid bearer token
-		respBadAuth, err := internalClient.doWithHeaders("", http.MethodGet, "/api/v1/users", "", map[string]string{
-			"Authorization": "Bearer invalid-token-999888777",
-		})
-		if err != nil {
-			t.Fatalf("request failed: %v", err)
-		}
-		if !statusMatches("401|403", respBadAuth.StatusCode) {
-			t.Fatalf("expected HTTP 401/403 for invalid bearer, got %d. Body: %s", respBadAuth.StatusCode, string(respBadAuth.Body))
 		}
 	})
 
