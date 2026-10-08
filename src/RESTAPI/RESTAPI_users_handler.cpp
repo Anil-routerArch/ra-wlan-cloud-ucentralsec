@@ -20,16 +20,19 @@ namespace OpenWifi {
 		bool IdOnly = (GetParameter("idOnly", "false") == "true");
 		auto nameSearch = GetParameter("nameSearch");
 		auto emailSearch = GetParameter("emailSearch");
+		auto createdBy = GetParameter("createdBy");
 
-		if (Internal_ && Request->has("X-INTERNAL-NAME")) {
-			Logger_.information(fmt::format(
-				"RESTAPI_users_handler::DoGet - Service-key access ({}) not supported for /users. User bearer token required.",
-				Requester()));
-			return UnAuthorized(RESTAPI::Errors::ACCESS_DENIED);
-		}
-
-		if (!IsAdminUserCaller(UserInfo_.userinfo)) {
-			return UnAuthorized(RESTAPI::Errors::ACCESS_DENIED);
+		if (Internal_) {
+			// On the internal router, allow authenticated microservices (via X-INTERNAL-NAME)
+			// OR authenticated administrative users (via Bearer token).
+			if (!Request->has("X-INTERNAL-NAME") && !IsAdminUserCaller(UserInfo_.userinfo)) {
+				return UnAuthorized(RESTAPI::Errors::ACCESS_DENIED);
+			}
+		} else {
+			// On the public router, strictly require ROOT or ADMIN user token
+			if (!IsAdminUserCaller(UserInfo_.userinfo)) {
+				return UnAuthorized(RESTAPI::Errors::ACCESS_DENIED);
+			}
 		}
 
 		std::string baseQuery;
@@ -45,7 +48,12 @@ namespace OpenWifi {
 											   ORM::Escape(Poco::toLower(emailSearch)));
 		}
 
-		if (UserInfo_.userinfo.userRole == SecurityObjects::ADMIN) {
+		if (Internal_) {
+			if (!createdBy.empty()) {
+				auto Scope = fmt::format(" createdby='{}' ", ORM::Escape(createdBy));
+				baseQuery = baseQuery.empty() ? Scope : fmt::format("{} and {}", Scope, baseQuery);
+			}
+		} else if (UserInfo_.userinfo.userRole == SecurityObjects::ADMIN) {
 			auto AdminScope = fmt::format(" createdby='{}' ", ORM::Escape(UserInfo_.userinfo.id));
 			baseQuery = baseQuery.empty() ? AdminScope : fmt::format("{} and {}", AdminScope, baseQuery);
 		}
@@ -74,7 +82,7 @@ namespace OpenWifi {
 			for (auto &i : SelectedRecords()) {
 				SecurityObjects::UserInfo UInfo;
 				if (StorageService()->UserDB().GetUserById(i, UInfo)) {
-					if (!ACLProcessor::CanReadUserRecord(UserInfo_.userinfo, UInfo)) {
+					if (!Internal_ && !ACLProcessor::CanReadUserRecord(UserInfo_.userinfo, UInfo)) {
 						continue;
 					}
 					Sanitize(UserInfo_, UInfo);

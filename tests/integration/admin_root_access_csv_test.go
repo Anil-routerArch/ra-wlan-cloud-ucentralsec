@@ -572,8 +572,8 @@ func verifyInternalUsersPluralRoutes(t *testing.T, httpClient *http.Client, base
 		}
 	})
 
-	// 2. Internal port + service-key authentication (X-INTERNAL-NAME + X-API-KEY) -> 403 Forbidden
-	t.Run("Internal_ServiceKey_403", func(t *testing.T) {
+	// 2. Internal port + service-key authentication (X-INTERNAL-NAME + X-API-KEY) -> 200 OK
+	t.Run("Internal_ServiceKey_200", func(t *testing.T) {
 		resp, err := internalClient.doWithHeaders("", http.MethodGet, "/api/v1/users", "", map[string]string{
 			"X-INTERNAL-NAME": internalName,
 			"X-API-KEY":       internalAPIKey,
@@ -581,8 +581,29 @@ func verifyInternalUsersPluralRoutes(t *testing.T, httpClient *http.Client, base
 		if err != nil {
 			t.Fatalf("request failed: %v", err)
 		}
-		if resp.StatusCode != http.StatusForbidden {
-			t.Fatalf("expected HTTP 403 Forbidden for service-key access to /users, got %d. Body: %s", resp.StatusCode, string(resp.Body))
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("expected HTTP 200 for service-key access to /users, got %d. Body: %s", resp.StatusCode, string(resp.Body))
+		}
+		var parsed map[string]any
+		if err := json.Unmarshal(resp.Body, &parsed); err != nil {
+			t.Fatalf("failed to parse JSON response: %v", err)
+		}
+		if _, hasUsers := parsed["users"]; !hasUsers {
+			t.Fatalf("response missing required 'users' array/field. Body: %s", string(resp.Body))
+		}
+	})
+
+	// 2b. Internal port + service-key + createdBy scoping -> 200 OK
+	t.Run("Internal_ServiceKey_CreatedByScope_200", func(t *testing.T) {
+		resp, err := internalClient.doWithHeaders("", http.MethodGet, "/api/v1/users?createdBy="+url.QueryEscape(csrUserID), "", map[string]string{
+			"X-INTERNAL-NAME": internalName,
+			"X-API-KEY":       internalAPIKey,
+		})
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("expected HTTP 200 for scoped service-key access to /users, got %d. Body: %s", resp.StatusCode, string(resp.Body))
 		}
 	})
 
