@@ -449,8 +449,18 @@ func loginUserForTest(client *apiClient, email, password string) (string, error)
 		}
 	}
 
-	// If initial root login requires password change (first boot), supply newPassword
-	newPassword := "TestPassword123!"
+	// Only permit first-boot password change if explicitly running in an ephemeral CI environment
+	// to prevent permanently altering root credentials on live or shared lab installations.
+	isEphemeralCI := strings.TrimSpace(os.Getenv("CI")) != "" || strings.TrimSpace(os.Getenv("OW_EPHEMERAL_TEST")) == "true"
+	if !isEphemeralCI {
+		return "", fmt.Errorf("login for %s failed with status %d: %s", email, resp.StatusCode, string(resp.Body))
+	}
+
+	// In ephemeral CI mode, if initial root login requires password change (fresh container boot), supply newPassword
+	newPassword := strings.TrimSpace(os.Getenv("OWSEC_ROOT_NEW_PASSWORD"))
+	if newPassword == "" {
+		newPassword = "TestPassword123!"
+	}
 	changeBodyMap := map[string]string{
 		"userId":      email,
 		"password":    password,
@@ -469,7 +479,7 @@ func loginUserForTest(client *apiClient, email, password string) (string, error)
 		}
 	}
 
-	// If password was already updated to newPassword in a previous run, retry with newPassword
+	// If password was already updated to newPassword in a previous CI step, retry with newPassword
 	retryBodyMap := map[string]string{
 		"userId":   email,
 		"password": newPassword,
@@ -619,6 +629,141 @@ func verifyInternalUsersPluralRoutes(t *testing.T, httpClient *http.Client, base
 		}
 	}
 
+	// Create two admins (Admin-A and Admin-B) and two scoped users (User-A1 and User-B1) to test ADMIN tenant isolation
+	adminAPassword := fmt.Sprintf("AdminAPass-%d!9", runID)
+	adminAEmail := fmt.Sprintf("autotest-admin-a-%d@example.com", runID)
+	createAdminABody, _ := json.Marshal(map[string]any{
+		"email":           adminAEmail,
+		"name":            "AutoTest Admin A",
+		"currentPassword": adminAPassword,
+		"userRole":        "admin",
+	})
+	createAdminAResp, err := publicClient.doWithHeaders("", http.MethodPost, "/api/v1/user/0", string(createAdminABody), map[string]string{
+		"Authorization": "Bearer " + rootToken,
+	})
+	if err != nil {
+		t.Fatalf("failed to create Admin A: %v", err)
+	}
+	if createAdminAResp.StatusCode != http.StatusOK && createAdminAResp.StatusCode != http.StatusCreated {
+		t.Fatalf("create Admin A expected 200/201, got %d: %s", createAdminAResp.StatusCode, string(createAdminAResp.Body))
+	}
+	var createdAdminA map[string]any
+	_ = json.Unmarshal(createAdminAResp.Body, &createdAdminA)
+	adminAID, _ := stringAt(createdAdminA, "id")
+
+	t.Cleanup(func() {
+		if adminAID != "" {
+			_, _ = publicClient.doWithHeaders("", http.MethodDelete, "/api/v1/user/"+adminAID, "", map[string]string{
+				"Authorization": "Bearer " + rootToken,
+			})
+		}
+	})
+
+	adminAToken, err := loginUserForTest(publicClient, adminAEmail, adminAPassword)
+	if err != nil {
+		adminAToken, err = loginUserForTest(internalClient, adminAEmail, adminAPassword)
+		if err != nil {
+			t.Fatalf("failed to login as Admin A: %v", err)
+		}
+	}
+
+	adminBPassword := fmt.Sprintf("AdminBPass-%d!9", runID)
+	adminBEmail := fmt.Sprintf("autotest-admin-b-%d@example.com", runID)
+	createAdminBBody, _ := json.Marshal(map[string]any{
+		"email":           adminBEmail,
+		"name":            "AutoTest Admin B",
+		"currentPassword": adminBPassword,
+		"userRole":        "admin",
+	})
+	createAdminBResp, err := publicClient.doWithHeaders("", http.MethodPost, "/api/v1/user/0", string(createAdminBBody), map[string]string{
+		"Authorization": "Bearer " + rootToken,
+	})
+	if err != nil {
+		t.Fatalf("failed to create Admin B: %v", err)
+	}
+	if createAdminBResp.StatusCode != http.StatusOK && createAdminBResp.StatusCode != http.StatusCreated {
+		t.Fatalf("create Admin B expected 200/201, got %d: %s", createAdminBResp.StatusCode, string(createAdminBResp.Body))
+	}
+	var createdAdminB map[string]any
+	_ = json.Unmarshal(createAdminBResp.Body, &createdAdminB)
+	adminBID, _ := stringAt(createdAdminB, "id")
+
+	t.Cleanup(func() {
+		if adminBID != "" {
+			_, _ = publicClient.doWithHeaders("", http.MethodDelete, "/api/v1/user/"+adminBID, "", map[string]string{
+				"Authorization": "Bearer " + rootToken,
+			})
+		}
+	})
+
+	adminBToken, err := loginUserForTest(publicClient, adminBEmail, adminBPassword)
+	if err != nil {
+		adminBToken, err = loginUserForTest(internalClient, adminBEmail, adminBPassword)
+		if err != nil {
+			t.Fatalf("failed to login as Admin B: %v", err)
+		}
+	}
+
+	// Admin-A creates User-A1
+	userA1Password := fmt.Sprintf("UserA1Pass-%d!9", runID)
+	userA1Email := fmt.Sprintf("autotest-usera1-%d@example.com", runID)
+	createUserA1Body, _ := json.Marshal(map[string]any{
+		"email":           userA1Email,
+		"name":            "AutoTest User A1",
+		"currentPassword": userA1Password,
+		"userRole":        "csr",
+	})
+	createUserA1Resp, err := publicClient.doWithHeaders("", http.MethodPost, "/api/v1/user/0", string(createUserA1Body), map[string]string{
+		"Authorization": "Bearer " + adminAToken,
+	})
+	if err != nil {
+		t.Fatalf("Admin A failed to create User A1: %v", err)
+	}
+	if createUserA1Resp.StatusCode != http.StatusOK && createUserA1Resp.StatusCode != http.StatusCreated {
+		t.Fatalf("Admin A create User A1 expected 200/201, got %d: %s", createUserA1Resp.StatusCode, string(createUserA1Resp.Body))
+	}
+	var createdUserA1 map[string]any
+	_ = json.Unmarshal(createUserA1Resp.Body, &createdUserA1)
+	userA1ID, _ := stringAt(createdUserA1, "id")
+
+	t.Cleanup(func() {
+		if userA1ID != "" {
+			_, _ = publicClient.doWithHeaders("", http.MethodDelete, "/api/v1/user/"+userA1ID, "", map[string]string{
+				"Authorization": "Bearer " + rootToken,
+			})
+		}
+	})
+
+	// Admin-B creates User-B1
+	userB1Password := fmt.Sprintf("UserB1Pass-%d!9", runID)
+	userB1Email := fmt.Sprintf("autotest-userb1-%d@example.com", runID)
+	createUserB1Body, _ := json.Marshal(map[string]any{
+		"email":           userB1Email,
+		"name":            "AutoTest User B1",
+		"currentPassword": userB1Password,
+		"userRole":        "csr",
+	})
+	createUserB1Resp, err := publicClient.doWithHeaders("", http.MethodPost, "/api/v1/user/0", string(createUserB1Body), map[string]string{
+		"Authorization": "Bearer " + adminBToken,
+	})
+	if err != nil {
+		t.Fatalf("Admin B failed to create User B1: %v", err)
+	}
+	if createUserB1Resp.StatusCode != http.StatusOK && createUserB1Resp.StatusCode != http.StatusCreated {
+		t.Fatalf("Admin B create User B1 expected 200/201, got %d: %s", createUserB1Resp.StatusCode, string(createUserB1Resp.Body))
+	}
+	var createdUserB1 map[string]any
+	_ = json.Unmarshal(createUserB1Resp.Body, &createdUserB1)
+	userB1ID, _ := stringAt(createdUserB1, "id")
+
+	t.Cleanup(func() {
+		if userB1ID != "" {
+			_, _ = publicClient.doWithHeaders("", http.MethodDelete, "/api/v1/user/"+userB1ID, "", map[string]string{
+				"Authorization": "Bearer " + rootToken,
+			})
+		}
+	})
+
 	// 1. Internal port + service-key + ROOT token delegation -> 200 OK (sees all users)
 	t.Run("Internal_ServiceKey_RootTokenDelegation_200", func(t *testing.T) {
 		resp, err := internalClient.doWithHeaders("", http.MethodGet, "/api/v1/users", "", map[string]string{
@@ -652,6 +797,21 @@ func verifyInternalUsersPluralRoutes(t *testing.T, httpClient *http.Client, base
 		}
 		if resp.StatusCode != http.StatusBadRequest {
 			t.Fatalf("expected HTTP 400 for service-key call without token, got %d. Body: %s", resp.StatusCode, string(resp.Body))
+		}
+	})
+
+	// 2b. Internal port + service-key + raw token without Bearer scheme -> 400 Bad Request
+	t.Run("Internal_ServiceKey_TokenWithoutBearerScheme_400", func(t *testing.T) {
+		resp, err := internalClient.doWithHeaders("", http.MethodGet, "/api/v1/users", "", map[string]string{
+			"X-INTERNAL-NAME": internalName,
+			"X-API-KEY":       internalAPIKey,
+			"Authorization":   rootToken, // raw token without "Bearer " scheme prefix
+		})
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("expected HTTP 400 for Authorization header without Bearer scheme, got %d. Body: %s", resp.StatusCode, string(resp.Body))
 		}
 	})
 
@@ -692,7 +852,7 @@ func verifyInternalUsersPluralRoutes(t *testing.T, httpClient *http.Client, base
 		}
 	})
 
-	// 4. Internal port + service-key + non-admin (CSR) token delegation -> 401/403 Access Denied
+	// 5. Internal port + service-key + non-admin (CSR) token delegation -> 401/403 Access Denied
 	t.Run("Internal_ServiceKey_NonAdminTokenDelegation_Denied", func(t *testing.T) {
 		resp, err := internalClient.doWithHeaders("", http.MethodGet, "/api/v1/users", "", map[string]string{
 			"X-INTERNAL-NAME": internalName,
@@ -707,7 +867,7 @@ func verifyInternalUsersPluralRoutes(t *testing.T, httpClient *http.Client, base
 		}
 	})
 
-	// 5. Internal port + User Bearer token (no X-INTERNAL-NAME) -> 401/403 Access Denied (internal requires service key)
+	// 6. Internal port + User Bearer token (no X-INTERNAL-NAME) -> 401/403 Access Denied (internal requires service key)
 	t.Run("Internal_UserBearerToken_Denied", func(t *testing.T) {
 		resp, err := internalClient.doWithHeaders("", http.MethodGet, "/api/v1/users", "", map[string]string{
 			"Authorization": "Bearer " + rootToken,
@@ -720,7 +880,7 @@ func verifyInternalUsersPluralRoutes(t *testing.T, httpClient *http.Client, base
 		}
 	})
 
-	// 6. Internal port + missing auth headers -> denied (401 or 403)
+	// 7. Internal port + missing auth headers -> denied (401 or 403)
 	t.Run("Internal_MissingAuth_Denied", func(t *testing.T) {
 		respNoAuth, err := internalClient.doWithHeaders("", http.MethodGet, "/api/v1/users", "", nil)
 		if err != nil {
@@ -731,7 +891,7 @@ func verifyInternalUsersPluralRoutes(t *testing.T, httpClient *http.Client, base
 		}
 	})
 
-	// 5. Public port + valid ROOT/ADMIN bearer -> 200 (still works, proving no regression)
+	// 8. Public port + valid ROOT bearer -> 200 (still works, proving no regression)
 	t.Run("Public_ValidRootBearer_200", func(t *testing.T) {
 		resp, err := publicClient.doWithHeaders("", http.MethodGet, "/api/v1/users", "", map[string]string{
 			"Authorization": "Bearer " + rootToken,
@@ -748,6 +908,141 @@ func verifyInternalUsersPluralRoutes(t *testing.T, httpClient *http.Client, base
 		}
 		if _, hasUsers := parsed["users"]; !hasUsers {
 			t.Fatalf("response missing required 'users' array/field. Body: %s", string(resp.Body))
+		}
+	})
+
+	// 9. Internal port + service-key + Admin token delegation -> 200 OK with Admin scoping (Admin-A sees User-A1, cannot see User-B1)
+	t.Run("Internal_ServiceKey_AdminIsolation_Scoping", func(t *testing.T) {
+		// Admin-A listing on internal port
+		respA, err := internalClient.doWithHeaders("", http.MethodGet, "/api/v1/users", "", map[string]string{
+			"X-INTERNAL-NAME": internalName,
+			"X-API-KEY":       internalAPIKey,
+			"Authorization":   "Bearer " + adminAToken,
+		})
+		if err != nil {
+			t.Fatalf("request with Admin-A token failed: %v", err)
+		}
+		if respA.StatusCode != http.StatusOK {
+			t.Fatalf("expected HTTP 200 for Admin-A, got %d. Body: %s", respA.StatusCode, string(respA.Body))
+		}
+
+		var parsedA map[string]any
+		if err := json.Unmarshal(respA.Body, &parsedA); err != nil {
+			t.Fatalf("failed to parse Admin-A JSON response: %v", err)
+		}
+		usersListA, ok := parsedA["users"].([]any)
+		if !ok {
+			t.Fatalf("Admin-A response missing 'users' array: %s", string(respA.Body))
+		}
+
+		foundA1InA := false
+		foundB1InA := false
+		for _, u := range usersListA {
+			userMap, ok := u.(map[string]any)
+			if !ok {
+				continue
+			}
+			id, _ := userMap["id"].(string)
+			if id == userA1ID {
+				foundA1InA = true
+			}
+			if id == userB1ID {
+				foundB1InA = true
+			}
+		}
+
+		if !foundA1InA {
+			t.Fatalf("Admin-A expected to see userA1 (%s) created by Admin-A, but was not in list", userA1ID)
+		}
+		if foundB1InA {
+			t.Fatalf("Admin-A saw userB1 (%s) created by Admin-B — ADMIN isolation violated!", userB1ID)
+		}
+
+		// Admin-B listing on internal port
+		respB, err := internalClient.doWithHeaders("", http.MethodGet, "/api/v1/users", "", map[string]string{
+			"X-INTERNAL-NAME": internalName,
+			"X-API-KEY":       internalAPIKey,
+			"Authorization":   "Bearer " + adminBToken,
+		})
+		if err != nil {
+			t.Fatalf("request with Admin-B token failed: %v", err)
+		}
+		if respB.StatusCode != http.StatusOK {
+			t.Fatalf("expected HTTP 200 for Admin-B, got %d. Body: %s", respB.StatusCode, string(respB.Body))
+		}
+
+		var parsedB map[string]any
+		if err := json.Unmarshal(respB.Body, &parsedB); err != nil {
+			t.Fatalf("failed to parse Admin-B JSON response: %v", err)
+		}
+		usersListB, ok := parsedB["users"].([]any)
+		if !ok {
+			t.Fatalf("Admin-B response missing 'users' array: %s", string(respB.Body))
+		}
+
+		foundB1InB := false
+		foundA1InB := false
+		for _, u := range usersListB {
+			userMap, ok := u.(map[string]any)
+			if !ok {
+				continue
+			}
+			id, _ := userMap["id"].(string)
+			if id == userB1ID {
+				foundB1InB = true
+			}
+			if id == userA1ID {
+				foundA1InB = true
+			}
+		}
+
+		if !foundB1InB {
+			t.Fatalf("Admin-B expected to see userB1 (%s) created by Admin-B, but was not in list", userB1ID)
+		}
+		if foundA1InB {
+			t.Fatalf("Admin-B saw userA1 (%s) created by Admin-A — ADMIN isolation violated!", userA1ID)
+		}
+	})
+
+	// 10. Public port + valid ADMIN bearer -> 200 with ADMIN scoping (proves no regression for admin on public port)
+	t.Run("Public_ValidAdminBearer_200", func(t *testing.T) {
+		resp, err := publicClient.doWithHeaders("", http.MethodGet, "/api/v1/users", "", map[string]string{
+			"Authorization": "Bearer " + adminAToken,
+		})
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("expected HTTP 200 on public endpoint for Admin-A, got %d. Body: %s", resp.StatusCode, string(resp.Body))
+		}
+		var parsed map[string]any
+		if err := json.Unmarshal(resp.Body, &parsed); err != nil {
+			t.Fatalf("failed to parse JSON response: %v", err)
+		}
+		usersList, ok := parsed["users"].([]any)
+		if !ok {
+			t.Fatalf("response missing required 'users' array/field. Body: %s", string(resp.Body))
+		}
+		foundA1 := false
+		foundB1 := false
+		for _, u := range usersList {
+			userMap, ok := u.(map[string]any)
+			if !ok {
+				continue
+			}
+			id, _ := userMap["id"].(string)
+			if id == userA1ID {
+				foundA1 = true
+			}
+			if id == userB1ID {
+				foundB1 = true
+			}
+		}
+		if !foundA1 {
+			t.Fatalf("Public Admin-A expected to see userA1 (%s), but was not in list", userA1ID)
+		}
+		if foundB1 {
+			t.Fatalf("Public Admin-A saw userB1 (%s) created by Admin-B — ADMIN isolation violated!", userB1ID)
 		}
 	})
 }

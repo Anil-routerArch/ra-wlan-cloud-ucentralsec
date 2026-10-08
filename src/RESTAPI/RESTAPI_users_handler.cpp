@@ -7,6 +7,7 @@
 #include "RESTAPI/RESTAPI_db_helpers.h"
 #include "AuthService.h"
 #include "StorageService.h"
+#include "Poco/Net/OAuth20Credentials.h"
 
 namespace OpenWifi {
 
@@ -43,15 +44,14 @@ namespace OpenWifi {
 				return UnAuthorized(RESTAPI::Errors::ACCESS_DENIED);
 			}
 
-			// Validate user delegation via Authorization: Bearer <token> header (safe, never leaked in URLs)
+			// Validate user delegation via Authorization: Bearer <token> header (strictly requiring Bearer scheme)
 			std::string userToken;
-			if (Request->has("Authorization")) {
-				auto authHeader = Request->get("Authorization");
-				if (authHeader.size() > 7 && Poco::toLower(authHeader.substr(0, 7)) == "bearer ") {
-					userToken = authHeader.substr(7);
-				} else {
-					userToken = authHeader;
+			try {
+				Poco::Net::OAuth20Credentials Auth(*Request);
+				if (Poco::icompare(Auth.getScheme(), "bearer") == 0) {
+					userToken = Auth.getBearerToken();
 				}
+			} catch (const Poco::Exception &) {
 			}
 
 			if (userToken.empty()) {
