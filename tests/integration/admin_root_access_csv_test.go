@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -426,7 +427,7 @@ func TestInternalUserRoutesLive(t *testing.T) {
 	}
 
 	t.Run("PluralUsers_InternalAndPublic_RBAC", func(t *testing.T) {
-		verifyInternalUsersPluralRoutes(t, httpClient, baseURL, internalBaseURL, internalName, internalAPIKey)
+		verifyInternalUsersPluralRoutes(t, httpClient, baseURL, internalBaseURL, internalName, internalAPIKey, rootID)
 	})
 }
 
@@ -488,7 +489,73 @@ func loginUserForTest(client *apiClient, email, password string) (string, error)
 	return "", fmt.Errorf("login for %s failed with status %d: %s", email, resp.StatusCode, string(resp.Body))
 }
 
-func verifyInternalUsersPluralRoutes(t *testing.T, httpClient *http.Client, baseURL, internalBaseURL, internalName, internalAPIKey string) {
+func createExpiredTokenInDB(rootID string) (string, func(), error) {
+	expiredToken := fmt.Sprintf("test-expired-token-%d", time.Now().UnixNano())
+
+	if envToken := strings.TrimSpace(os.Getenv("OWSEC_EXPIRED_TOKEN")); envToken != "" {
+		return envToken, func() {}, nil
+	}
+
+	insertSQL := fmt.Sprintf(
+		"INSERT INTO tokens (token, refreshtoken, tokentype, username, created, expires, idletimeout, revocationdate, lastrefresh) VALUES ('%s', '', 'Bearer', '%s', 1, 1, 0, 0, 0);",
+		expiredToken, rootID,
+	)
+	deleteSQL := fmt.Sprintf("DELETE FROM tokens WHERE token = '%s';", expiredToken)
+
+	// 1. Try SQLite file locations (CI runner and local SQLite setups)
+	sqlitePaths := []string{
+		strings.TrimSpace(os.Getenv("OWSEC_SQLITE_PATH")),
+		"/tmp/owsec-data/data/security.db",
+		"/owsec-data/data/security.db",
+		"/owsec-data/security.db",
+		"./security.db",
+		"/tmp/security.db",
+	}
+	for _, p := range sqlitePaths {
+		if p == "" {
+			continue
+		}
+		if _, err := os.Stat(p); err == nil {
+			cmd := exec.Command("sqlite3", p, insertSQL)
+			if err := cmd.Run(); err == nil {
+				cleanup := func() {
+					_ = exec.Command("sqlite3", p, deleteSQL).Run()
+				}
+				return expiredToken, cleanup, nil
+			}
+		}
+	}
+
+	// 2. Try docker exec with PostgreSQL
+	pgContainers := []string{"openwifi-postgresql-1", "postgresql", "openwifi_postgresql_1"}
+	for _, c := range pgContainers {
+		cmd := exec.Command("docker", "exec", c, "psql", "-U", "owsec", "-d", "owsec", "-c", insertSQL)
+		if err := cmd.Run(); err == nil {
+			cleanup := func() {
+				_ = exec.Command("docker", "exec", c, "psql", "-U", "owsec", "-d", "owsec", "-c", deleteSQL).Run()
+			}
+			return expiredToken, cleanup, nil
+		}
+	}
+
+	// 3. Try docker exec with SQLite in running container
+	secContainers := []string{"owsec", "openwifi-owsec-1"}
+	for _, c := range secContainers {
+		for _, p := range []string{"/owsec-data/data/security.db", "/owsec-data/security.db"} {
+			cmd := exec.Command("docker", "exec", c, "sqlite3", p, insertSQL)
+			if err := cmd.Run(); err == nil {
+				cleanup := func() {
+					_ = exec.Command("docker", "exec", c, "sqlite3", p, deleteSQL).Run()
+				}
+				return expiredToken, cleanup, nil
+			}
+		}
+	}
+
+	return "", func() {}, fmt.Errorf("no database access available to insert expired token")
+}
+
+func verifyInternalUsersPluralRoutes(t *testing.T, httpClient *http.Client, baseURL, internalBaseURL, internalName, internalAPIKey, rootID string) {
 	internalClient := newAPIClient(strings.TrimSuffix(internalBaseURL, "/api/v1"), httpClient)
 	publicClient := newAPIClient(strings.TrimSuffix(baseURL, "/api/v1"), httpClient)
 
@@ -600,6 +667,28 @@ func verifyInternalUsersPluralRoutes(t *testing.T, httpClient *http.Client, base
 		}
 		if !statusMatches("401|403", resp.StatusCode) {
 			t.Fatalf("expected HTTP 401/403 for invalid token, got %d. Body: %s", resp.StatusCode, string(resp.Body))
+		}
+	})
+
+	// 4. Internal port + service-key + expired ROOT token -> 401/403 Denied (EXPIRED_TOKEN)
+	t.Run("Internal_ServiceKey_ExpiredToken_Denied", func(t *testing.T) {
+		expiredToken, cleanup, err := createExpiredTokenInDB(rootID)
+		if err != nil {
+			t.Logf("skipping expired token verification (DB manipulation unavailable): %v", err)
+			return
+		}
+		defer cleanup()
+
+		resp, err := internalClient.doWithHeaders("", http.MethodGet, "/api/v1/users", "", map[string]string{
+			"X-INTERNAL-NAME": internalName,
+			"X-API-KEY":       internalAPIKey,
+			"Authorization":   "Bearer " + expiredToken,
+		})
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		if !statusMatches("401|403", resp.StatusCode) {
+			t.Fatalf("expected HTTP 401/403 for expired token, got %d. Body: %s", resp.StatusCode, string(resp.Body))
 		}
 	})
 

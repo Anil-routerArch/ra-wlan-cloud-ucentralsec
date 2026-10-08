@@ -59,7 +59,7 @@ namespace OpenWifi {
 			}
 
 			bool Expired = false;
-			if (!AuthService()->IsValidToken(userToken, SecObj.webtoken, SecObj.userinfo, Expired)) {
+			if (!AuthService()->IsValidToken(userToken, SecObj.webtoken, SecObj.userinfo, Expired) || Expired) {
 				return Expired ? UnAuthorized(RESTAPI::Errors::EXPIRED_TOKEN)
 							   : UnAuthorized(RESTAPI::Errors::INVALID_TOKEN);
 			}
