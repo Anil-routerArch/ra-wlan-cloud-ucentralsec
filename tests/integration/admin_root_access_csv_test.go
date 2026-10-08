@@ -519,94 +519,69 @@ func createExpiredTokenInDB(t *testing.T, rootID string) (string, func(), error)
 
 	var failureErrs []string
 
-	// 1. Try explicitly configured SQLite path or standard test paths
-	sqlitePaths := []string{
-		strings.TrimSpace(os.Getenv("OWSEC_SQLITE_PATH")),
-		"/tmp/owsec-data/data/security.db",
-		"/tmp/owsec-data/security.db",
-		"/owsec-data/data/security.db",
-		"/owsec-data/security.db",
+	// 1. Explicit SQLite database path or ephemeral test path
+	sqlitePath := strings.TrimSpace(os.Getenv("OWSEC_SQLITE_PATH"))
+	if sqlitePath == "" {
+		sqlitePath = "/tmp/owsec-data/data/security.db"
 	}
-	for _, p := range sqlitePaths {
-		if p == "" {
-			continue
-		}
-		if _, err := os.Stat(p); err == nil {
-			// 1a. Try host sqlite3 CLI
-			if cmd := exec.Command("sqlite3", p, insertSQL); cmd.Run() == nil {
-				cleanup := func() {
-					delCmd := exec.Command("sqlite3", p, deleteSQL)
-					if out, delErr := delCmd.CombinedOutput(); delErr != nil {
-						t.Errorf("cleanup failed: unable to delete expired token from SQLite %s: %v (output: %s)", p, delErr, string(out))
-					}
-				}
-				return expiredToken, cleanup, nil
-			}
-
-			// 1b. Try host python3 sqlite3 module (standard in Linux/CI runners)
-			pyInsert := fmt.Sprintf("import sqlite3; c=sqlite3.connect('%s'); c.execute('''%s'''); c.commit()", p, insertSQL)
-			pyDelete := fmt.Sprintf("import sqlite3; c=sqlite3.connect('%s'); c.execute('''%s'''); c.commit()", p, deleteSQL)
-			if cmd := exec.Command("python3", "-c", pyInsert); cmd.Run() == nil {
-				cleanup := func() {
-					delCmd := exec.Command("python3", "-c", pyDelete)
-					if out, delErr := delCmd.CombinedOutput(); delErr != nil {
-						t.Errorf("cleanup failed: unable to delete expired token via python3 from SQLite %s: %v (output: %s)", p, delErr, string(out))
-					}
-				}
-				return expiredToken, cleanup, nil
-			} else {
-				out, _ := exec.Command("python3", "-c", pyInsert).CombinedOutput()
-				failureErrs = append(failureErrs, fmt.Sprintf("python3 on %s failed: %s", p, strings.TrimSpace(string(out))))
-			}
-		}
-	}
-
-	// 2. Try explicitly configured or standard test containers
-	targetContainers := []string{}
-	if configuredContainer := strings.TrimSpace(os.Getenv("OWSEC_DB_CONTAINER")); configuredContainer != "" {
-		targetContainers = append(targetContainers, configuredContainer)
-	}
-	targetContainers = append(targetContainers, "owsec", "openwifi-owsec-1", "openwifi-postgresql-1")
-
-	for _, c := range targetContainers {
-		for _, p := range []string{"/owsec-data/data/security.db", "/owsec-data/security.db"} {
-			// Try sqlite3 inside container
-			cmd := exec.Command("docker", "exec", c, "sqlite3", p, insertSQL)
-			if err := cmd.Run(); err == nil {
-				cleanup := func() {
-					delCmd := exec.Command("docker", "exec", c, "sqlite3", p, deleteSQL)
-					if out, delErr := delCmd.CombinedOutput(); delErr != nil {
-						t.Errorf("cleanup failed: unable to delete expired token from container %s (%s): %v (output: %s)", c, p, delErr, string(out))
-					}
-				}
-				return expiredToken, cleanup, nil
-			}
-
-			// Try python3 inside container
-			pyInsert := fmt.Sprintf("import sqlite3; c=sqlite3.connect('%s'); c.execute('''%s'''); c.commit()", p, insertSQL)
-			pyDelete := fmt.Sprintf("import sqlite3; c=sqlite3.connect('%s'); c.execute('''%s'''); c.commit()", p, deleteSQL)
-			cmdPy := exec.Command("docker", "exec", c, "python3", "-c", pyInsert)
-			if err := cmdPy.Run(); err == nil {
-				cleanup := func() {
-					delCmd := exec.Command("docker", "exec", c, "python3", "-c", pyDelete)
-					if out, delErr := delCmd.CombinedOutput(); delErr != nil {
-						t.Errorf("cleanup failed: unable to delete expired token via python3 from container %s: %v (output: %s)", c, delErr, string(out))
-					}
-				}
-				return expiredToken, cleanup, nil
-			}
-		}
-
-		cmd := exec.Command("docker", "exec", c, "psql", "-U", "owsec", "-d", "owsec", "-c", insertSQL)
-		if err := cmd.Run(); err == nil {
+	if _, err := os.Stat(sqlitePath); err == nil {
+		// 1a. Try host sqlite3 CLI
+		if cmd := exec.Command("sqlite3", sqlitePath, insertSQL); cmd.Run() == nil {
 			cleanup := func() {
-				delCmd := exec.Command("docker", "exec", c, "psql", "-U", "owsec", "-d", "owsec", "-c", deleteSQL)
+				delCmd := exec.Command("sqlite3", sqlitePath, deleteSQL)
 				if out, delErr := delCmd.CombinedOutput(); delErr != nil {
-					t.Errorf("cleanup failed: unable to delete expired token from PostgreSQL container %s: %v (output: %s)", c, delErr, string(out))
+					t.Errorf("cleanup failed: unable to delete expired token from SQLite %s: %v (output: %s)", sqlitePath, delErr, string(out))
 				}
 			}
 			return expiredToken, cleanup, nil
 		}
+
+		// 1b. Try host python3 sqlite3 module
+		pyInsert := fmt.Sprintf("import sqlite3; c=sqlite3.connect('%s'); c.execute('''%s'''); c.commit()", sqlitePath, insertSQL)
+		pyDelete := fmt.Sprintf("import sqlite3; c=sqlite3.connect('%s'); c.execute('''%s'''); c.commit()", sqlitePath, deleteSQL)
+		if cmd := exec.Command("python3", "-c", pyInsert); cmd.Run() == nil {
+			cleanup := func() {
+				delCmd := exec.Command("python3", "-c", pyDelete)
+				if out, delErr := delCmd.CombinedOutput(); delErr != nil {
+					t.Errorf("cleanup failed: unable to delete expired token via python3 from SQLite %s: %v (output: %s)", sqlitePath, delErr, string(out))
+				}
+			}
+			return expiredToken, cleanup, nil
+		} else {
+			out, _ := exec.Command("python3", "-c", pyInsert).CombinedOutput()
+			failureErrs = append(failureErrs, fmt.Sprintf("python3 on %s failed: %s", sqlitePath, strings.TrimSpace(string(out))))
+		}
+	} else {
+		failureErrs = append(failureErrs, fmt.Sprintf("sqlite path %s not found: %v", sqlitePath, err))
+	}
+
+	// 2. Explicitly configured test container
+	dbContainer := strings.TrimSpace(os.Getenv("OWSEC_DB_CONTAINER"))
+	if dbContainer != "" {
+		for _, p := range []string{"/owsec-data/data/security.db", "/owsec-data/security.db"} {
+			cmd := exec.Command("docker", "exec", dbContainer, "sqlite3", p, insertSQL)
+			if err := cmd.Run(); err == nil {
+				cleanup := func() {
+					delCmd := exec.Command("docker", "exec", dbContainer, "sqlite3", p, deleteSQL)
+					if out, delErr := delCmd.CombinedOutput(); delErr != nil {
+						t.Errorf("cleanup failed: unable to delete expired token from container %s (%s): %v (output: %s)", dbContainer, p, delErr, string(out))
+					}
+				}
+				return expiredToken, cleanup, nil
+			}
+		}
+
+		cmd := exec.Command("docker", "exec", dbContainer, "psql", "-U", "owsec", "-d", "owsec", "-c", insertSQL)
+		if err := cmd.Run(); err == nil {
+			cleanup := func() {
+				delCmd := exec.Command("docker", "exec", dbContainer, "psql", "-U", "owsec", "-d", "owsec", "-c", deleteSQL)
+				if out, delErr := delCmd.CombinedOutput(); delErr != nil {
+					t.Errorf("cleanup failed: unable to delete expired token from PostgreSQL container %s: %v (output: %s)", dbContainer, delErr, string(out))
+				}
+			}
+			return expiredToken, cleanup, nil
+		}
+		failureErrs = append(failureErrs, fmt.Sprintf("failed accessing database inside OWSEC_DB_CONTAINER (%s)", dbContainer))
 	}
 
 	errMsg := "no accessible test database target found to insert expired token (set OWSEC_SQLITE_PATH or OWSEC_DB_CONTAINER)"
@@ -664,12 +639,22 @@ func verifyInternalUsersPluralRoutes(t *testing.T, httpClient *http.Client, base
 	_ = json.Unmarshal(createResp.Body, &createdUser)
 	csrUserID, _ := stringAt(createdUser, "id")
 
-	t.Cleanup(func() {
-		if csrUserID != "" {
-			_, _ = publicClient.doWithHeaders("", http.MethodDelete, "/api/v1/user/"+csrUserID, "", map[string]string{
-				"Authorization": "Bearer " + rootToken,
-			})
+	cleanupUser := func(id, label string) {
+		if id == "" {
+			return
 		}
+		resp, err := publicClient.doWithHeaders("", http.MethodDelete, "/api/v1/user/"+id, "", map[string]string{
+			"Authorization": "Bearer " + rootToken,
+		})
+		if err != nil {
+			t.Errorf("cleanup failed for %s (%s): %v", label, id, err)
+		} else if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+			t.Errorf("cleanup for %s (%s) returned unexpected status %d: %s", label, id, resp.StatusCode, string(resp.Body))
+		}
+	}
+
+	t.Cleanup(func() {
+		cleanupUser(csrUserID, "CSR user")
 	})
 
 	csrToken, err := loginUserForTest(publicClient, csrEmail, csrPassword)
@@ -703,11 +688,7 @@ func verifyInternalUsersPluralRoutes(t *testing.T, httpClient *http.Client, base
 	adminAID, _ := stringAt(createdAdminA, "id")
 
 	t.Cleanup(func() {
-		if adminAID != "" {
-			_, _ = publicClient.doWithHeaders("", http.MethodDelete, "/api/v1/user/"+adminAID, "", map[string]string{
-				"Authorization": "Bearer " + rootToken,
-			})
-		}
+		cleanupUser(adminAID, "Admin A")
 	})
 
 	adminAToken, err := loginUserForTest(publicClient, adminAEmail, adminAPassword)
@@ -740,11 +721,7 @@ func verifyInternalUsersPluralRoutes(t *testing.T, httpClient *http.Client, base
 	adminBID, _ := stringAt(createdAdminB, "id")
 
 	t.Cleanup(func() {
-		if adminBID != "" {
-			_, _ = publicClient.doWithHeaders("", http.MethodDelete, "/api/v1/user/"+adminBID, "", map[string]string{
-				"Authorization": "Bearer " + rootToken,
-			})
-		}
+		cleanupUser(adminBID, "Admin B")
 	})
 
 	adminBToken, err := loginUserForTest(publicClient, adminBEmail, adminBPassword)
@@ -778,11 +755,7 @@ func verifyInternalUsersPluralRoutes(t *testing.T, httpClient *http.Client, base
 	userA1ID, _ := stringAt(createdUserA1, "id")
 
 	t.Cleanup(func() {
-		if userA1ID != "" {
-			_, _ = publicClient.doWithHeaders("", http.MethodDelete, "/api/v1/user/"+userA1ID, "", map[string]string{
-				"Authorization": "Bearer " + rootToken,
-			})
-		}
+		cleanupUser(userA1ID, "User A1")
 	})
 
 	// Admin-B creates User-B1
@@ -808,11 +781,7 @@ func verifyInternalUsersPluralRoutes(t *testing.T, httpClient *http.Client, base
 	userB1ID, _ := stringAt(createdUserB1, "id")
 
 	t.Cleanup(func() {
-		if userB1ID != "" {
-			_, _ = publicClient.doWithHeaders("", http.MethodDelete, "/api/v1/user/"+userB1ID, "", map[string]string{
-				"Authorization": "Bearer " + rootToken,
-			})
-		}
+		cleanupUser(userB1ID, "User B1")
 	})
 
 	// 1. Internal port + service-key + ROOT token delegation -> 200 OK (sees all users)

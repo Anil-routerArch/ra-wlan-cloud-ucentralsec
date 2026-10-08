@@ -221,10 +221,12 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Install sqlite3 on the host runner and ensure full permissions on the data volume
-          sudo apt-get update -qq && sudo apt-get install -y -qq sqlite3 || true
-          sudo chmod -R 777 /tmp/owsec-data || true
-          ls -la /tmp/owsec-data/ /tmp/owsec-data/data/ 2>/dev/null || true
+          # Install sqlite3 CLI on the host runner for test database manipulation
+          sudo apt-get update -qq && sudo apt-get install -y -qq sqlite3
+
+          # Grant test runner ownership with restrictive permissions (750)
+          sudo chown -R "$(id -u):$(id -g)" /tmp/owsec-data
+          chmod -R 750 /tmp/owsec-data
 
           # Compute owsec's internal API key (SHA-256 of public URI) instantaneously
           export X_API_KEY=$(echo -n "https://localhost:16001" | sha256sum | awk '{print $1}')
