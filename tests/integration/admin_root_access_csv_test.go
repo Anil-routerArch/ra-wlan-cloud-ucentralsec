@@ -517,19 +517,23 @@ func createExpiredTokenInDB(t *testing.T, rootID string) (string, func(), error)
 	)
 	deleteSQL := fmt.Sprintf("DELETE FROM tokens WHERE token = '%s';", expiredToken)
 
+	var failureErrs []string
+
 	// 1. Try explicitly configured SQLite path or standard test paths
 	sqlitePaths := []string{
 		strings.TrimSpace(os.Getenv("OWSEC_SQLITE_PATH")),
 		"/tmp/owsec-data/data/security.db",
+		"/tmp/owsec-data/security.db",
 		"/owsec-data/data/security.db",
+		"/owsec-data/security.db",
 	}
 	for _, p := range sqlitePaths {
 		if p == "" {
 			continue
 		}
 		if _, err := os.Stat(p); err == nil {
-			cmd := exec.Command("sqlite3", p, insertSQL)
-			if err := cmd.Run(); err == nil {
+			// 1a. Try host sqlite3 CLI
+			if cmd := exec.Command("sqlite3", p, insertSQL); cmd.Run() == nil {
 				cleanup := func() {
 					delCmd := exec.Command("sqlite3", p, deleteSQL)
 					if out, delErr := delCmd.CombinedOutput(); delErr != nil {
@@ -537,6 +541,22 @@ func createExpiredTokenInDB(t *testing.T, rootID string) (string, func(), error)
 					}
 				}
 				return expiredToken, cleanup, nil
+			}
+
+			// 1b. Try host python3 sqlite3 module (standard in Linux/CI runners)
+			pyInsert := fmt.Sprintf("import sqlite3; c=sqlite3.connect('%s'); c.execute('''%s'''); c.commit()", p, insertSQL)
+			pyDelete := fmt.Sprintf("import sqlite3; c=sqlite3.connect('%s'); c.execute('''%s'''); c.commit()", p, deleteSQL)
+			if cmd := exec.Command("python3", "-c", pyInsert); cmd.Run() == nil {
+				cleanup := func() {
+					delCmd := exec.Command("python3", "-c", pyDelete)
+					if out, delErr := delCmd.CombinedOutput(); delErr != nil {
+						t.Errorf("cleanup failed: unable to delete expired token via python3 from SQLite %s: %v (output: %s)", p, delErr, string(out))
+					}
+				}
+				return expiredToken, cleanup, nil
+			} else {
+				out, _ := exec.Command("python3", "-c", pyInsert).CombinedOutput()
+				failureErrs = append(failureErrs, fmt.Sprintf("python3 on %s failed: %s", p, strings.TrimSpace(string(out))))
 			}
 		}
 	}
@@ -550,12 +570,27 @@ func createExpiredTokenInDB(t *testing.T, rootID string) (string, func(), error)
 
 	for _, c := range targetContainers {
 		for _, p := range []string{"/owsec-data/data/security.db", "/owsec-data/security.db"} {
+			// Try sqlite3 inside container
 			cmd := exec.Command("docker", "exec", c, "sqlite3", p, insertSQL)
 			if err := cmd.Run(); err == nil {
 				cleanup := func() {
 					delCmd := exec.Command("docker", "exec", c, "sqlite3", p, deleteSQL)
 					if out, delErr := delCmd.CombinedOutput(); delErr != nil {
 						t.Errorf("cleanup failed: unable to delete expired token from container %s (%s): %v (output: %s)", c, p, delErr, string(out))
+					}
+				}
+				return expiredToken, cleanup, nil
+			}
+
+			// Try python3 inside container
+			pyInsert := fmt.Sprintf("import sqlite3; c=sqlite3.connect('%s'); c.execute('''%s'''); c.commit()", p, insertSQL)
+			pyDelete := fmt.Sprintf("import sqlite3; c=sqlite3.connect('%s'); c.execute('''%s'''); c.commit()", p, deleteSQL)
+			cmdPy := exec.Command("docker", "exec", c, "python3", "-c", pyInsert)
+			if err := cmdPy.Run(); err == nil {
+				cleanup := func() {
+					delCmd := exec.Command("docker", "exec", c, "python3", "-c", pyDelete)
+					if out, delErr := delCmd.CombinedOutput(); delErr != nil {
+						t.Errorf("cleanup failed: unable to delete expired token via python3 from container %s: %v (output: %s)", c, delErr, string(out))
 					}
 				}
 				return expiredToken, cleanup, nil
@@ -574,7 +609,11 @@ func createExpiredTokenInDB(t *testing.T, rootID string) (string, func(), error)
 		}
 	}
 
-	return "", func() {}, fmt.Errorf("no accessible test database target found to insert expired token (set OWSEC_SQLITE_PATH or OWSEC_DB_CONTAINER)")
+	errMsg := "no accessible test database target found to insert expired token (set OWSEC_SQLITE_PATH or OWSEC_DB_CONTAINER)"
+	if len(failureErrs) > 0 {
+		errMsg += ": " + strings.Join(failureErrs, "; ")
+	}
+	return "", func() {}, fmt.Errorf("%s", errMsg)
 }
 
 func verifyInternalUsersPluralRoutes(t *testing.T, httpClient *http.Client, baseURL, internalBaseURL, internalName, internalAPIKey, rootID string) {
