@@ -449,11 +449,11 @@ func loginUserForTest(client *apiClient, email, password string) (string, error)
 		}
 	}
 
-	// Only permit first-boot password change if explicitly running in an ephemeral CI environment
-	// to prevent permanently altering root credentials on live or shared lab installations.
-	isEphemeralCI := strings.TrimSpace(os.Getenv("CI")) != "" || strings.TrimSpace(os.Getenv("OW_EPHEMERAL_TEST")) == "true"
-	if !isEphemeralCI {
-		return "", fmt.Errorf("login for %s failed with status %d: %s", email, resp.StatusCode, string(resp.Body))
+	// Only permit first-boot password initialization if the target environment is explicitly
+	// marked as ephemeral with OW_EPHEMERAL_TEST=true. Never rely solely on CI=true to avoid
+	// mutating credentials on persistent lab or staging deployments.
+	if strings.TrimSpace(os.Getenv("OW_EPHEMERAL_TEST")) != "true" {
+		return "", fmt.Errorf("initial login for %s failed with status %d (password initialization disallowed without OW_EPHEMERAL_TEST=true): %s", email, resp.StatusCode, string(resp.Body))
 	}
 
 	// In ephemeral CI mode, if initial root login requires password change (fresh container boot), supply newPassword
@@ -499,11 +499,16 @@ func loginUserForTest(client *apiClient, email, password string) (string, error)
 	return "", fmt.Errorf("login for %s failed with status %d: %s", email, resp.StatusCode, string(resp.Body))
 }
 
-func createExpiredTokenInDB(rootID string) (string, func(), error) {
+func createExpiredTokenInDB(t *testing.T, rootID string) (string, func(), error) {
 	expiredToken := fmt.Sprintf("test-expired-token-%d", time.Now().UnixNano())
 
 	if envToken := strings.TrimSpace(os.Getenv("OWSEC_EXPIRED_TOKEN")); envToken != "" {
 		return envToken, func() {}, nil
+	}
+
+	// Fail closed if the environment is not explicitly designated as ephemeral
+	if strings.TrimSpace(os.Getenv("OW_EPHEMERAL_TEST")) != "true" {
+		return "", func() {}, fmt.Errorf("direct database expired-token fixture insertion disallowed unless OW_EPHEMERAL_TEST=true is explicitly configured")
 	}
 
 	insertSQL := fmt.Sprintf(
@@ -512,14 +517,11 @@ func createExpiredTokenInDB(rootID string) (string, func(), error) {
 	)
 	deleteSQL := fmt.Sprintf("DELETE FROM tokens WHERE token = '%s';", expiredToken)
 
-	// 1. Try SQLite file locations (CI runner and local SQLite setups)
+	// 1. Try explicitly configured SQLite path or standard test paths
 	sqlitePaths := []string{
 		strings.TrimSpace(os.Getenv("OWSEC_SQLITE_PATH")),
 		"/tmp/owsec-data/data/security.db",
 		"/owsec-data/data/security.db",
-		"/owsec-data/security.db",
-		"./security.db",
-		"/tmp/security.db",
 	}
 	for _, p := range sqlitePaths {
 		if p == "" {
@@ -529,40 +531,50 @@ func createExpiredTokenInDB(rootID string) (string, func(), error) {
 			cmd := exec.Command("sqlite3", p, insertSQL)
 			if err := cmd.Run(); err == nil {
 				cleanup := func() {
-					_ = exec.Command("sqlite3", p, deleteSQL).Run()
+					delCmd := exec.Command("sqlite3", p, deleteSQL)
+					if out, delErr := delCmd.CombinedOutput(); delErr != nil {
+						t.Errorf("cleanup failed: unable to delete expired token from SQLite %s: %v (output: %s)", p, delErr, string(out))
+					}
 				}
 				return expiredToken, cleanup, nil
 			}
 		}
 	}
 
-	// 2. Try docker exec with PostgreSQL
-	pgContainers := []string{"openwifi-postgresql-1", "postgresql", "openwifi_postgresql_1"}
-	for _, c := range pgContainers {
+	// 2. Try explicitly configured or standard test containers
+	targetContainers := []string{}
+	if configuredContainer := strings.TrimSpace(os.Getenv("OWSEC_DB_CONTAINER")); configuredContainer != "" {
+		targetContainers = append(targetContainers, configuredContainer)
+	}
+	targetContainers = append(targetContainers, "owsec", "openwifi-owsec-1", "openwifi-postgresql-1")
+
+	for _, c := range targetContainers {
+		for _, p := range []string{"/owsec-data/data/security.db", "/owsec-data/security.db"} {
+			cmd := exec.Command("docker", "exec", c, "sqlite3", p, insertSQL)
+			if err := cmd.Run(); err == nil {
+				cleanup := func() {
+					delCmd := exec.Command("docker", "exec", c, "sqlite3", p, deleteSQL)
+					if out, delErr := delCmd.CombinedOutput(); delErr != nil {
+						t.Errorf("cleanup failed: unable to delete expired token from container %s (%s): %v (output: %s)", c, p, delErr, string(out))
+					}
+				}
+				return expiredToken, cleanup, nil
+			}
+		}
+
 		cmd := exec.Command("docker", "exec", c, "psql", "-U", "owsec", "-d", "owsec", "-c", insertSQL)
 		if err := cmd.Run(); err == nil {
 			cleanup := func() {
-				_ = exec.Command("docker", "exec", c, "psql", "-U", "owsec", "-d", "owsec", "-c", deleteSQL).Run()
+				delCmd := exec.Command("docker", "exec", c, "psql", "-U", "owsec", "-d", "owsec", "-c", deleteSQL)
+				if out, delErr := delCmd.CombinedOutput(); delErr != nil {
+					t.Errorf("cleanup failed: unable to delete expired token from PostgreSQL container %s: %v (output: %s)", c, delErr, string(out))
+				}
 			}
 			return expiredToken, cleanup, nil
 		}
 	}
 
-	// 3. Try docker exec with SQLite in running container
-	secContainers := []string{"owsec", "openwifi-owsec-1"}
-	for _, c := range secContainers {
-		for _, p := range []string{"/owsec-data/data/security.db", "/owsec-data/security.db"} {
-			cmd := exec.Command("docker", "exec", c, "sqlite3", p, insertSQL)
-			if err := cmd.Run(); err == nil {
-				cleanup := func() {
-					_ = exec.Command("docker", "exec", c, "sqlite3", p, deleteSQL).Run()
-				}
-				return expiredToken, cleanup, nil
-			}
-		}
-	}
-
-	return "", func() {}, fmt.Errorf("no database access available to insert expired token")
+	return "", func() {}, fmt.Errorf("no accessible test database target found to insert expired token (set OWSEC_SQLITE_PATH or OWSEC_DB_CONTAINER)")
 }
 
 func verifyInternalUsersPluralRoutes(t *testing.T, httpClient *http.Client, baseURL, internalBaseURL, internalName, internalAPIKey, rootID string) {
@@ -832,7 +844,7 @@ func verifyInternalUsersPluralRoutes(t *testing.T, httpClient *http.Client, base
 
 	// 4. Internal port + service-key + expired ROOT token -> 401/403 Denied (EXPIRED_TOKEN)
 	t.Run("Internal_ServiceKey_ExpiredToken_Denied", func(t *testing.T) {
-		expiredToken, cleanup, err := createExpiredTokenInDB(rootID)
+		expiredToken, cleanup, err := createExpiredTokenInDB(t, rootID)
 		if err != nil {
 			t.Fatalf("failed to prepare expired token fixture in database: %v", err)
 		}

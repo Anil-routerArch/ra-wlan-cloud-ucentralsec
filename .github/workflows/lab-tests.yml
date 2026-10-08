@@ -215,6 +215,9 @@ jobs:
           OW_ALLOW_INSECURE_TLS: "true"
           OWSEC_ROOT_EMAIL: tip@ucentral.com
           OWSEC_ROOT_PASSWORD: openwifi
+          OW_EPHEMERAL_TEST: "true"
+          OWSEC_DB_CONTAINER: owsec
+          OWSEC_SQLITE_PATH: /tmp/owsec-data/data/security.db
         run: |
           set -euo pipefail
 
