@@ -5,6 +5,7 @@
 #include "RESTAPI_users_handler.h"
 #include "ACLProcessor.h"
 #include "RESTAPI/RESTAPI_db_helpers.h"
+#include "AuthService.h"
 #include "StorageService.h"
 
 namespace OpenWifi {
@@ -35,28 +36,32 @@ namespace OpenWifi {
 											   ORM::Escape(Poco::toLower(emailSearch)));
 		}
 
+		SecurityObjects::UserInfoAndPolicy SecObj;
+
 		if (Internal_) {
 			// On the internal router, strictly require authenticated microservices (via X-INTERNAL-NAME)
 			if (!Request->has("X-INTERNAL-NAME")) {
 				return UnAuthorized(RESTAPI::Errors::ACCESS_DENIED);
 			}
 
-			// Service-to-service calls must specify on whose behalf they are querying users (userId or createdBy)
-			auto targetUserId = GetParameter("userId", GetParameter("createdBy"));
-			if (targetUserId.empty()) {
-				return BadRequest(RESTAPI::Errors::MissingUserID);
+			// Validate user delegation via token passed as parameter
+			std::string userToken = GetParameter("token");
+			if (userToken.empty()) {
+				return BadRequest(RESTAPI::Errors::MissingOrInvalidParameters);
 			}
 
-			SecurityObjects::UserInfo TargetUser;
-			if (!StorageService()->UserDB().GetUserById(targetUserId, TargetUser)) {
-				return NotFound();
+			bool Expired = false;
+			if (!AuthService()->IsValidToken(userToken, SecObj.webtoken, SecObj.userinfo, Expired)) {
+				return Expired ? UnAuthorized(RESTAPI::Errors::EXPIRED_TOKEN)
+							   : UnAuthorized(RESTAPI::Errors::INVALID_TOKEN);
 			}
 
-			if (TargetUser.userRole == SecurityObjects::ROOT) {
-				// ROOT scope: sees all users (no createdBy filter)
-			} else if (TargetUser.userRole == SecurityObjects::ADMIN) {
+			const auto &callerInfo = SecObj.userinfo;
+			if (callerInfo.userRole == SecurityObjects::ROOT) {
+				// ROOT scope: sees all users
+			} else if (callerInfo.userRole == SecurityObjects::ADMIN) {
 				// ADMIN scope: only see users created by this admin
-				auto Scope = fmt::format(" createdby='{}' ", ORM::Escape(TargetUser.id));
+				auto Scope = fmt::format(" createdby='{}' ", ORM::Escape(callerInfo.id));
 				baseQuery = baseQuery.empty() ? Scope : fmt::format("{} and {}", Scope, baseQuery);
 			} else {
 				// Non-admin callers (CSR, SUBSCRIBER, etc.) cannot list users
@@ -74,12 +79,15 @@ namespace OpenWifi {
 			}
 		}
 
+		const auto &effectiveUserInfoPolicy = Internal_ ? SecObj : UserInfo_;
+		const auto &effectiveUserInfo = Internal_ ? SecObj.userinfo : UserInfo_.userinfo;
+
 		if (QB_.Select.empty()) {
 			SecurityObjects::UserInfoList Users;
 			if (StorageService()->UserDB().GetUsers(QB_.Offset, QB_.Limit, Users.users,
 													baseQuery)) {
 				for (auto &i : Users.users) {
-					Sanitize(UserInfo_, i);
+					Sanitize(effectiveUserInfoPolicy, i);
 				}
 				if (IdOnly) {
 					Poco::JSON::Array Arr;
@@ -98,10 +106,10 @@ namespace OpenWifi {
 			for (auto &i : SelectedRecords()) {
 				SecurityObjects::UserInfo UInfo;
 				if (StorageService()->UserDB().GetUserById(i, UInfo)) {
-					if (!Internal_ && !ACLProcessor::CanReadUserRecord(UserInfo_.userinfo, UInfo)) {
+					if (!ACLProcessor::CanReadUserRecord(effectiveUserInfo, UInfo)) {
 						continue;
 					}
-					Sanitize(UserInfo_, UInfo);
+					Sanitize(effectiveUserInfoPolicy, UInfo);
 					Users.users.emplace_back(UInfo);
 				}
 			}

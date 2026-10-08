@@ -552,9 +552,9 @@ func verifyInternalUsersPluralRoutes(t *testing.T, httpClient *http.Client, base
 		}
 	}
 
-	// 1. Internal port + service-key + ROOT userId delegation -> 200 OK (sees all users)
-	t.Run("Internal_ServiceKey_RootDelegation_200", func(t *testing.T) {
-		resp, err := internalClient.doWithHeaders("", http.MethodGet, "/api/v1/users?userId="+url.QueryEscape(rootID), "", map[string]string{
+	// 1. Internal port + service-key + ROOT token delegation -> 200 OK (sees all users)
+	t.Run("Internal_ServiceKey_RootTokenDelegation_200", func(t *testing.T) {
+		resp, err := internalClient.doWithHeaders("", http.MethodGet, "/api/v1/users?token="+url.QueryEscape(rootToken), "", map[string]string{
 			"X-INTERNAL-NAME": internalName,
 			"X-API-KEY":       internalAPIKey,
 		})
@@ -573,22 +573,8 @@ func verifyInternalUsersPluralRoutes(t *testing.T, httpClient *http.Client, base
 		}
 	})
 
-	// 2. Internal port + service-key + ADMIN userId delegation -> 200 OK (scoped to users created by this admin)
-	t.Run("Internal_ServiceKey_AdminDelegation_200", func(t *testing.T) {
-		resp, err := internalClient.doWithHeaders("", http.MethodGet, "/api/v1/users?userId="+url.QueryEscape(rootID), "", map[string]string{
-			"X-INTERNAL-NAME": internalName,
-			"X-API-KEY":       internalAPIKey,
-		})
-		if err != nil {
-			t.Fatalf("request failed: %v", err)
-		}
-		if resp.StatusCode != http.StatusOK {
-			t.Fatalf("expected HTTP 200 for admin-scoped service-key access to /users, got %d. Body: %s", resp.StatusCode, string(resp.Body))
-		}
-	})
-
-	// 3. Internal port + service-key without userId parameter -> 400 Bad Request (Missing user ID)
-	t.Run("Internal_ServiceKey_MissingUserId_400", func(t *testing.T) {
+	// 2. Internal port + service-key without token parameter or Authorization header -> 400 Bad Request
+	t.Run("Internal_ServiceKey_MissingToken_400", func(t *testing.T) {
 		resp, err := internalClient.doWithHeaders("", http.MethodGet, "/api/v1/users", "", map[string]string{
 			"X-INTERNAL-NAME": internalName,
 			"X-API-KEY":       internalAPIKey,
@@ -597,13 +583,13 @@ func verifyInternalUsersPluralRoutes(t *testing.T, httpClient *http.Client, base
 			t.Fatalf("request failed: %v", err)
 		}
 		if resp.StatusCode != http.StatusBadRequest {
-			t.Fatalf("expected HTTP 400 for service-key call without userId, got %d. Body: %s", resp.StatusCode, string(resp.Body))
+			t.Fatalf("expected HTTP 400 for service-key call without token, got %d. Body: %s", resp.StatusCode, string(resp.Body))
 		}
 	})
 
-	// 4. Internal port + service-key + non-admin (CSR) userId delegation -> 401/403 Access Denied
-	t.Run("Internal_ServiceKey_NonAdminDelegation_Denied", func(t *testing.T) {
-		resp, err := internalClient.doWithHeaders("", http.MethodGet, "/api/v1/users?userId="+url.QueryEscape(csrUserID), "", map[string]string{
+	// 3. Internal port + service-key + invalid token -> 401/403 Denied
+	t.Run("Internal_ServiceKey_InvalidToken_Denied", func(t *testing.T) {
+		resp, err := internalClient.doWithHeaders("", http.MethodGet, "/api/v1/users?token=invalid-token-12345", "", map[string]string{
 			"X-INTERNAL-NAME": internalName,
 			"X-API-KEY":       internalAPIKey,
 		})
@@ -611,13 +597,27 @@ func verifyInternalUsersPluralRoutes(t *testing.T, httpClient *http.Client, base
 			t.Fatalf("request failed: %v", err)
 		}
 		if !statusMatches("401|403", resp.StatusCode) {
-			t.Fatalf("expected HTTP 401/403 for non-admin delegated user, got %d. Body: %s", resp.StatusCode, string(resp.Body))
+			t.Fatalf("expected HTTP 401/403 for invalid token, got %d. Body: %s", resp.StatusCode, string(resp.Body))
+		}
+	})
+
+	// 4. Internal port + service-key + non-admin (CSR) token delegation -> 401/403 Access Denied
+	t.Run("Internal_ServiceKey_NonAdminTokenDelegation_Denied", func(t *testing.T) {
+		resp, err := internalClient.doWithHeaders("", http.MethodGet, "/api/v1/users?token="+url.QueryEscape(csrToken), "", map[string]string{
+			"X-INTERNAL-NAME": internalName,
+			"X-API-KEY":       internalAPIKey,
+		})
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		if !statusMatches("401|403", resp.StatusCode) {
+			t.Fatalf("expected HTTP 401/403 for non-admin token delegated user, got %d. Body: %s", resp.StatusCode, string(resp.Body))
 		}
 	})
 
 	// 5. Internal port + User Bearer token (no X-INTERNAL-NAME) -> 401/403 Access Denied (internal requires service key)
 	t.Run("Internal_UserBearerToken_Denied", func(t *testing.T) {
-		resp, err := internalClient.doWithHeaders("", http.MethodGet, "/api/v1/users?userId="+url.QueryEscape(rootID), "", map[string]string{
+		resp, err := internalClient.doWithHeaders("", http.MethodGet, "/api/v1/users?token="+url.QueryEscape(rootToken), "", map[string]string{
 			"Authorization": "Bearer " + rootToken,
 		})
 		if err != nil {
