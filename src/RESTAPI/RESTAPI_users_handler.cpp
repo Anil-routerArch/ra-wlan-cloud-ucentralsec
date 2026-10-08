@@ -21,7 +21,6 @@ namespace OpenWifi {
 		bool IdOnly = (GetParameter("idOnly", "false") == "true");
 		auto nameSearch = GetParameter("nameSearch");
 		auto emailSearch = GetParameter("emailSearch");
-		auto createdBy = GetParameter("createdBy");
 
 		std::string baseQuery;
 		if (!nameSearch.empty() || !emailSearch.empty()) {
@@ -44,8 +43,17 @@ namespace OpenWifi {
 				return UnAuthorized(RESTAPI::Errors::ACCESS_DENIED);
 			}
 
-			// Validate user delegation via token passed as parameter
-			std::string userToken = GetParameter("token");
+			// Validate user delegation via Authorization: Bearer <token> header (safe, never leaked in URLs)
+			std::string userToken;
+			if (Request->has("Authorization")) {
+				auto authHeader = Request->get("Authorization");
+				if (authHeader.size() > 7 && Poco::toLower(authHeader.substr(0, 7)) == "bearer ") {
+					userToken = authHeader.substr(7);
+				} else {
+					userToken = authHeader;
+				}
+			}
+
 			if (userToken.empty()) {
 				return BadRequest(RESTAPI::Errors::MissingOrInvalidParameters);
 			}
