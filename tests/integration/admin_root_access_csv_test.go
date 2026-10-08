@@ -881,6 +881,21 @@ func verifyInternalUsersPluralRoutes(t *testing.T, httpClient *http.Client, base
 		}
 	})
 
+	// 3b. Internal port + valid service name + invalid service key + valid ROOT token -> 401/403 Denied
+	t.Run("Internal_InvalidServiceKey_ValidRootToken_Denied", func(t *testing.T) {
+		resp, err := internalClient.doWithHeaders("", http.MethodGet, "/api/v1/users", "", map[string]string{
+			"X-INTERNAL-NAME": internalName,
+			"X-API-KEY":       "invalid-service-key-99999",
+			"Authorization":   "Bearer " + rootToken,
+		})
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		if !statusMatches("401|403", resp.StatusCode) {
+			t.Fatalf("expected HTTP 401/403 for invalid service key despite valid root token, got %d. Body: %s", resp.StatusCode, string(resp.Body))
+		}
+	})
+
 	// 4. Internal port + service-key + expired ROOT token -> 401/403 Denied (EXPIRED_TOKEN)
 	t.Run("Internal_ServiceKey_ExpiredToken_Denied", func(t *testing.T) {
 		expiredToken, cleanup, err := createExpiredTokenInDB(t, rootID)

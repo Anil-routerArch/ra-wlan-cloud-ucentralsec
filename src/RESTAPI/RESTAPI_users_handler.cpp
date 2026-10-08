@@ -39,7 +39,10 @@ namespace OpenWifi {
 		SecurityObjects::UserInfoAndPolicy SecObj;
 
 		if (Internal_) {
-			// On the internal router, strictly require authenticated microservices (via X-INTERNAL-NAME)
+			// Note: Machine credentials (X-INTERNAL-NAME and X-API-KEY) are authoritatively verified
+			// upstream by RESTAPIHandler::handleRequest() -> IsAuthorized() -> MicroServiceIsValidAPIKEY().
+			// We strictly enforce X-INTERNAL-NAME presence to prevent callers from bypassing machine identity,
+			// and then proceed with validating the delegated end-user Bearer token and scoping.
 			if (!Request->has("X-INTERNAL-NAME")) {
 				return UnAuthorized(RESTAPI::Errors::ACCESS_DENIED);
 			}
