@@ -100,7 +100,7 @@ RUN mkdir -p "$OWSEC_ROOT" "$OWSEC_CONFIG" && \
 RUN apt-get -o Acquire::Retries=5 update && \
     apt-get -o Acquire::Retries=5 install --no-install-recommends -y \
     librdkafka++1 gosu gettext ca-certificates bash jq curl wget \
-    libmariadb3 libpq5 postgresql-client sqlite3 libfmt10 tzdata && \
+    libmariadb3 libpq5 postgresql-client libfmt10 tzdata && \
     rm -rf /var/lib/apt/lists/*
 
 COPY readiness_check /readiness_check
