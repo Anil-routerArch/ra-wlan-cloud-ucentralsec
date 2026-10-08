@@ -213,6 +213,8 @@ jobs:
           OWSEC_ROOT_ID: 11111111-0000-0000-6666-999999999999
           OW_RBAC_TLS_ROOT_CA: /tmp/owsec-data/certs/restapi-ca.pem
           OW_ALLOW_INSECURE_TLS: "true"
+          OWSEC_ROOT_EMAIL: tip@ucentral.com
+          OWSEC_ROOT_PASSWORD: openwifi
         run: |
           set -euo pipefail
 

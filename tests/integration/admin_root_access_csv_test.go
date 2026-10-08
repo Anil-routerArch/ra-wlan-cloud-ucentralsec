@@ -392,7 +392,7 @@ func sanitizeSubtestName(s string) string {
 }
 
 // TestInternalUserRoutesLive verifies internal IPC header authentication (X-INTERNAL-NAME & X-API-KEY)
-// against a live ucentralsec C++ daemon instance when configured via environment variables.
+// as well as internal /api/v1/users RBAC against a live ucentralsec C++ daemon instance.
 func TestInternalUserRoutesLive(t *testing.T) {
 	internalBaseURL := strings.TrimSpace(os.Getenv("OWSEC_INTERNAL_BASE_URL"))
 	internalName := strings.TrimSpace(os.Getenv("X_INTERNAL_NAME"))
@@ -414,7 +414,232 @@ func TestInternalUserRoutesLive(t *testing.T) {
 		rootID = "11111111-0000-0000-6666-999999999999"
 	}
 
-	if err := verifyInternalUserRoutes(httpClient, internalBaseURL, rootID); err != nil {
-		t.Fatalf("live internal user routes verification failed: %v", err)
+	t.Run("SingularUser_IPC_Auth", func(t *testing.T) {
+		if err := verifyInternalUserRoutes(httpClient, internalBaseURL, rootID); err != nil {
+			t.Fatalf("live internal user routes verification failed: %v", err)
+		}
+	})
+
+	baseURL := strings.TrimSpace(os.Getenv("OWSEC_BASE_URL"))
+	if baseURL == "" {
+		baseURL = strings.Replace(internalBaseURL, ":17001", ":16001", 1)
 	}
+
+	t.Run("PluralUsers_InternalAndPublic_RBAC", func(t *testing.T) {
+		verifyInternalUsersPluralRoutes(t, httpClient, baseURL, internalBaseURL, internalName, internalAPIKey)
+	})
 }
+
+func loginUserForTest(client *apiClient, email, password string) (string, error) {
+	bodyMap := map[string]string{
+		"userId":   email,
+		"password": password,
+	}
+	bodyBytes, _ := json.Marshal(bodyMap)
+	resp, err := client.doWithHeaders("", http.MethodPost, "/api/v1/oauth2", string(bodyBytes), nil)
+	if err != nil {
+		return "", fmt.Errorf("login request failed: %w", err)
+	}
+
+	if resp.StatusCode == http.StatusOK {
+		token, _ := stringAt(resp.JSON, "access_token")
+		if token != "" {
+			return token, nil
+		}
+	}
+
+	// If initial root login requires password change (first boot), supply newPassword
+	newPassword := "TestPassword123!"
+	changeBodyMap := map[string]string{
+		"userId":      email,
+		"password":    password,
+		"newPassword": newPassword,
+	}
+	changeBodyBytes, _ := json.Marshal(changeBodyMap)
+	resp, err = client.doWithHeaders("", http.MethodPost, "/api/v1/oauth2", string(changeBodyBytes), nil)
+	if err != nil {
+		return "", fmt.Errorf("login with newPassword failed: %w", err)
+	}
+
+	if resp.StatusCode == http.StatusOK {
+		token, _ := stringAt(resp.JSON, "access_token")
+		if token != "" {
+			return token, nil
+		}
+	}
+
+	// If password was already updated to newPassword in a previous run, retry with newPassword
+	retryBodyMap := map[string]string{
+		"userId":   email,
+		"password": newPassword,
+	}
+	retryBodyBytes, _ := json.Marshal(retryBodyMap)
+	resp, err = client.doWithHeaders("", http.MethodPost, "/api/v1/oauth2", string(retryBodyBytes), nil)
+	if err != nil {
+		return "", fmt.Errorf("retry login failed: %w", err)
+	}
+	if resp.StatusCode == http.StatusOK {
+		token, _ := stringAt(resp.JSON, "access_token")
+		if token != "" {
+			return token, nil
+		}
+	}
+
+	return "", fmt.Errorf("login for %s failed with status %d: %s", email, resp.StatusCode, string(resp.Body))
+}
+
+func verifyInternalUsersPluralRoutes(t *testing.T, httpClient *http.Client, baseURL, internalBaseURL, internalName, internalAPIKey string) {
+	internalClient := newAPIClient(strings.TrimSuffix(internalBaseURL, "/api/v1"), httpClient)
+	publicClient := newAPIClient(strings.TrimSuffix(baseURL, "/api/v1"), httpClient)
+
+	rootEmail := strings.TrimSpace(os.Getenv("OWSEC_ROOT_EMAIL"))
+	if rootEmail == "" {
+		rootEmail = "tip@ucentral.com"
+	}
+	rootPassword := strings.TrimSpace(os.Getenv("OWSEC_ROOT_PASSWORD"))
+	if rootPassword == "" {
+		rootPassword = "openwifi"
+	}
+
+	// Obtain valid ROOT bearer token
+	rootToken, err := loginUserForTest(publicClient, rootEmail, rootPassword)
+	if err != nil {
+		rootToken, err = loginUserForTest(internalClient, rootEmail, rootPassword)
+		if err != nil {
+			t.Fatalf("failed to obtain ROOT bearer token for users route test: %v", err)
+		}
+	}
+
+	// Create temporary non-admin (CSR) user to obtain non-admin bearer token
+	runID := time.Now().UnixNano()
+	csrEmail := fmt.Sprintf("autotest-csr-internal-%d@example.com", runID)
+	csrPassword := fmt.Sprintf("CsrPass-%d!9", runID)
+	createBody := map[string]any{
+		"email":           csrEmail,
+		"name":            "AutoTest CSR",
+		"currentPassword": csrPassword,
+		"userRole":        "csr",
+	}
+	createBytes, _ := json.Marshal(createBody)
+
+	createResp, err := publicClient.doWithHeaders("", http.MethodPost, "/api/v1/user/0", string(createBytes), map[string]string{
+		"Authorization": "Bearer " + rootToken,
+	})
+	if err != nil {
+		t.Fatalf("failed to create non-admin CSR user: %v", err)
+	}
+	if createResp.StatusCode != http.StatusOK && createResp.StatusCode != http.StatusCreated {
+		t.Fatalf("create CSR user expected 200/201, got %d: %s", createResp.StatusCode, string(createResp.Body))
+	}
+
+	var createdUser map[string]any
+	_ = json.Unmarshal(createResp.Body, &createdUser)
+	csrUserID, _ := stringAt(createdUser, "id")
+
+	t.Cleanup(func() {
+		if csrUserID != "" {
+			_, _ = publicClient.doWithHeaders("", http.MethodDelete, "/api/v1/user/"+csrUserID, "", map[string]string{
+				"Authorization": "Bearer " + rootToken,
+			})
+		}
+	})
+
+	csrToken, err := loginUserForTest(publicClient, csrEmail, csrPassword)
+	if err != nil {
+		csrToken, err = loginUserForTest(internalClient, csrEmail, csrPassword)
+		if err != nil {
+			t.Fatalf("failed to login as non-admin CSR user: %v", err)
+		}
+	}
+
+	// 1. Internal port + valid ROOT/ADMIN bearer -> 200 and /users is routed correctly
+	t.Run("Internal_ValidRootBearer_200", func(t *testing.T) {
+		resp, err := internalClient.doWithHeaders("", http.MethodGet, "/api/v1/users", "", map[string]string{
+			"Authorization": "Bearer " + rootToken,
+		})
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("expected HTTP 200, got %d. Body: %s", resp.StatusCode, string(resp.Body))
+		}
+		var parsed map[string]any
+		if err := json.Unmarshal(resp.Body, &parsed); err != nil {
+			t.Fatalf("failed to parse JSON response: %v", err)
+		}
+		if _, hasUsers := parsed["users"]; !hasUsers {
+			t.Fatalf("response missing required 'users' array/field. Body: %s", string(resp.Body))
+		}
+	})
+
+	// 2. Internal port + service-key authentication (X-INTERNAL-NAME + X-API-KEY) -> 403 Forbidden
+	t.Run("Internal_ServiceKey_403", func(t *testing.T) {
+		resp, err := internalClient.doWithHeaders("", http.MethodGet, "/api/v1/users", "", map[string]string{
+			"X-INTERNAL-NAME": internalName,
+			"X-API-KEY":       internalAPIKey,
+		})
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		if resp.StatusCode != http.StatusForbidden {
+			t.Fatalf("expected HTTP 403 Forbidden for service-key access to /users, got %d. Body: %s", resp.StatusCode, string(resp.Body))
+		}
+	})
+
+	// 3. Internal port + valid non-admin bearer -> 403 Forbidden
+	t.Run("Internal_NonAdminBearer_403", func(t *testing.T) {
+		resp, err := internalClient.doWithHeaders("", http.MethodGet, "/api/v1/users", "", map[string]string{
+			"Authorization": "Bearer " + csrToken,
+		})
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		if resp.StatusCode != http.StatusForbidden {
+			t.Fatalf("expected HTTP 403 Forbidden for non-admin bearer access to /users, got %d. Body: %s", resp.StatusCode, string(resp.Body))
+		}
+	})
+
+	// 4. Internal port + missing/invalid bearer -> denied (401 or 403)
+	t.Run("Internal_MissingOrInvalidBearer_Denied", func(t *testing.T) {
+		// Missing credentials
+		respNoAuth, err := internalClient.doWithHeaders("", http.MethodGet, "/api/v1/users", "", nil)
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		if !statusMatches("401|403", respNoAuth.StatusCode) {
+			t.Fatalf("expected HTTP 401/403 for missing auth, got %d. Body: %s", respNoAuth.StatusCode, string(respNoAuth.Body))
+		}
+
+		// Invalid bearer token
+		respBadAuth, err := internalClient.doWithHeaders("", http.MethodGet, "/api/v1/users", "", map[string]string{
+			"Authorization": "Bearer invalid-token-999888777",
+		})
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		if !statusMatches("401|403", respBadAuth.StatusCode) {
+			t.Fatalf("expected HTTP 401/403 for invalid bearer, got %d. Body: %s", respBadAuth.StatusCode, string(respBadAuth.Body))
+		}
+	})
+
+	// 5. Public port + valid ROOT/ADMIN bearer -> 200 (still works, proving no regression)
+	t.Run("Public_ValidRootBearer_200", func(t *testing.T) {
+		resp, err := publicClient.doWithHeaders("", http.MethodGet, "/api/v1/users", "", map[string]string{
+			"Authorization": "Bearer " + rootToken,
+		})
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("expected HTTP 200 on public endpoint, got %d. Body: %s", resp.StatusCode, string(resp.Body))
+		}
+		var parsed map[string]any
+		if err := json.Unmarshal(resp.Body, &parsed); err != nil {
+			t.Fatalf("failed to parse JSON response: %v", err)
+		}
+		if _, hasUsers := parsed["users"]; !hasUsers {
+			t.Fatalf("response missing required 'users' array/field. Body: %s", string(resp.Body))
+		}
+	})
+}
+
