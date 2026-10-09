@@ -320,17 +320,30 @@ func verifyInternalUserRoutes(httpClient *http.Client, internalBaseURL, rootID s
 			unregisteredSvcResp.StatusCode, string(unregisteredSvcResp.Body))
 	}
 
-	// 5. Negative Internal Auth Check: Valid API Key + owprov Public Endpoint (Private Endpoint Only Hardening)
+	// 5. Positive Internal Auth Check: Valid API Key + owprov Public Endpoint (Both private and public endpoints accepted)
 	publicEndpointResp, err := internalClient.doWithHeaders("", http.MethodGet, "/api/v1/user/"+url.PathEscape(rootID), "", map[string]string{
-		"X-INTERNAL-NAME": "https://localhost:16005", // owprov public endpoint (not private endpoint)
+		"X-INTERNAL-NAME": "https://localhost:16005", // owprov public endpoint
 		"X-API-KEY":       internalAPIKey,
 	})
 	if err != nil {
-		return fmt.Errorf("negative internal request (owprov public endpoint) failed: %w", err)
+		return fmt.Errorf("positive internal request (owprov public endpoint) failed: %w", err)
 	}
-	if !statusMatches("401|403", publicEndpointResp.StatusCode) {
-		return fmt.Errorf("negative internal request (owprov public endpoint) expected 401/403 access denied, got %d. Body: %s",
+	if !statusMatches("200", publicEndpointResp.StatusCode) {
+		return fmt.Errorf("positive internal request (owprov public endpoint) expected 200, got %d. Body: %s",
 			publicEndpointResp.StatusCode, string(publicEndpointResp.Body))
+	}
+
+	// 5b. Negative Internal Auth Check: Valid API Key + owfms Public Endpoint
+	unauthPublicResp, err := internalClient.doWithHeaders("", http.MethodGet, "/api/v1/user/"+url.PathEscape(rootID), "", map[string]string{
+		"X-INTERNAL-NAME": "https://localhost:16004", // public endpoint of registered owfms service (not owprov)
+		"X-API-KEY":       internalAPIKey,
+	})
+	if err != nil {
+		return fmt.Errorf("negative internal request (owfms public endpoint) failed: %w", err)
+	}
+	if !statusMatches("401|403", unauthPublicResp.StatusCode) {
+		return fmt.Errorf("negative internal request (owfms public endpoint) expected 401/403 access denied, got %d. Body: %s",
+			unauthPublicResp.StatusCode, string(unauthPublicResp.Body))
 	}
 
 	// 6. Negative Internal Auth Check: Non-GET HTTP Methods (POST, PUT, DELETE) on Internal User Routes
