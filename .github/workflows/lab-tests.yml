@@ -224,9 +224,8 @@ jobs:
           # Install sqlite3 CLI on the host runner for test database manipulation
           sudo apt-get update -qq && sudo apt-get install -y -qq sqlite3
 
-          # Grant test runner ownership with restrictive permissions (750)
-          sudo chown -R "$(id -u):$(id -g)" /tmp/owsec-data
-          chmod -R 750 /tmp/owsec-data
+          # Ensure both host runner and container (UID 1000) have read/write access to test DB volume
+          sudo chmod -R a+rwX /tmp/owsec-data
 
           # Compute owsec's internal API key (SHA-256 of public URI) instantaneously
           export X_API_KEY=$(echo -n "https://localhost:16001" | sha256sum | awk '{print $1}')
