@@ -235,15 +235,26 @@ func cleanupUsers(t *testing.T, client *apiClient, vars map[string]string, creat
 	}
 }
 
+func getInternalAuthEnv() (string, string) {
+	name := strings.TrimSpace(os.Getenv("OWSEC_INTERNAL_NAME"))
+	if name == "" {
+		name = strings.TrimSpace(os.Getenv("X_INTERNAL_NAME"))
+	}
+	key := strings.TrimSpace(os.Getenv("OWSEC_INTERNAL_API_KEY"))
+	if key == "" {
+		key = strings.TrimSpace(os.Getenv("X_API_KEY"))
+	}
+	return name, key
+}
+
 func verifyInternalUserRoutes(httpClient *http.Client, internalBaseURL, rootID string) error {
 	if strings.TrimSpace(rootID) == "" {
 		return fmt.Errorf("rootID is required for internal route verification")
 	}
 
-	internalName := strings.TrimSpace(os.Getenv("X_INTERNAL_NAME"))
-	internalAPIKey := strings.TrimSpace(os.Getenv("X_API_KEY"))
+	internalName, internalAPIKey := getInternalAuthEnv()
 	if internalName == "" || internalAPIKey == "" {
-		return nil
+		return fmt.Errorf("internal authentication requires OWSEC_INTERNAL_NAME (or X_INTERNAL_NAME) and OWSEC_INTERNAL_API_KEY (or X_API_KEY)")
 	}
 
 	internalClient := newAPIClient(strings.TrimSuffix(internalBaseURL, "/api/v1"), httpClient)
@@ -409,11 +420,10 @@ func sanitizeSubtestName(s string) string {
 // as well as internal /api/v1/users RBAC against a live ucentralsec C++ daemon instance.
 func TestInternalUserRoutesLive(t *testing.T) {
 	internalBaseURL := strings.TrimSpace(os.Getenv("OWSEC_INTERNAL_BASE_URL"))
-	internalName := strings.TrimSpace(os.Getenv("X_INTERNAL_NAME"))
-	internalAPIKey := strings.TrimSpace(os.Getenv("X_API_KEY"))
+	internalName, internalAPIKey := getInternalAuthEnv()
 
 	if internalBaseURL == "" || internalName == "" || internalAPIKey == "" {
-		t.Fatalf("Live daemon verification failed: OWSEC_INTERNAL_BASE_URL, X_INTERNAL_NAME, and X_API_KEY environment variables are required.")
+		t.Fatalf("Live daemon verification failed: OWSEC_INTERNAL_BASE_URL, OWSEC_INTERNAL_NAME (or X_INTERNAL_NAME), and OWSEC_INTERNAL_API_KEY (or X_API_KEY) environment variables are required.")
 	}
 
 	tlsRootCA := os.Getenv("OW_RBAC_TLS_ROOT_CA")
