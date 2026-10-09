@@ -213,8 +213,19 @@ jobs:
           OWSEC_ROOT_ID: 11111111-0000-0000-6666-999999999999
           OW_RBAC_TLS_ROOT_CA: /tmp/owsec-data/certs/restapi-ca.pem
           OW_ALLOW_INSECURE_TLS: "true"
+          OWSEC_ROOT_EMAIL: tip@ucentral.com
+          OWSEC_ROOT_PASSWORD: openwifi
+          OW_EPHEMERAL_TEST: "true"
+          OWSEC_DB_CONTAINER: owsec
+          OWSEC_SQLITE_PATH: /tmp/owsec-data/data/security.db
         run: |
           set -euo pipefail
+
+          # Install sqlite3 CLI on the host runner for test database manipulation
+          sudo apt-get update -qq && sudo apt-get install -y -qq sqlite3
+
+          # Ensure both host runner and container (UID 1000) have read/write access to test DB volume
+          sudo chmod -R a+rwX /tmp/owsec-data
 
           # Compute owsec's internal API key (SHA-256 of public URI) instantaneously
           export X_API_KEY=$(echo -n "https://localhost:16001" | sha256sum | awk '{print $1}')

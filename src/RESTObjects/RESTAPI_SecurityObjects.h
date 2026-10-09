@@ -149,7 +149,7 @@ namespace OpenWifi {
 			std::string createdBy;
 			bool suspended = false;
 			bool blackListed = false;
-			USER_ROLE userRole;
+			USER_ROLE userRole = UNKNOWN;
 			UserLoginLoginExtensions userTypeProprietaryInfo;
 			std::string securityPolicy;
 			uint64_t securityPolicyChange = 0;
